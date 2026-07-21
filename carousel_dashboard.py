@@ -11,7 +11,8 @@ Run:
 Then open port 8000 from the Codespaces PORTS tab.
 
 Features:
-- Paste or edit a complete carousel.json payload
+- Build carousel.json through structured story and slide forms
+- Add, duplicate, delete, and reorder slides
 - Save it under stories/<slug>/carousel.json
 - Render through render_carousel.py
 - Preview generated PNG slides in the browser
@@ -93,6 +94,90 @@ def output_images(output_slug: str) -> list[Path]:
     return sorted(folder.glob("*.png"))
 
 
+def _slide_form_data(payload: str) -> tuple[str, str, list[dict[str, str]]]:
+    """Convert an existing carousel payload into structured form values."""
+    story_title = ""
+    source = ""
+    slides: list[dict[str, str]] = []
+
+    if payload.strip():
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            data = {}
+
+        if isinstance(data, dict):
+            story_title = str(data.get("story") or data.get("title") or "")
+            source = str(data.get("source") or "")
+
+            raw_slides = data.get("slides")
+            if isinstance(raw_slides, list):
+                for index, raw_slide in enumerate(raw_slides, start=1):
+                    if not isinstance(raw_slide, dict):
+                        continue
+
+                    headline = raw_slide.get("headline")
+                    if not headline:
+                        headline_lines = raw_slide.get("headline_lines")
+                        if isinstance(headline_lines, list):
+                            headline = "\n".join(str(line) for line in headline_lines)
+                        else:
+                            headline = ""
+
+                    body = raw_slide.get("body", "")
+                    if isinstance(body, list):
+                        body_parts: list[str] = []
+                        for block in body:
+                            if isinstance(block, dict):
+                                text = block.get("text")
+                                if text:
+                                    body_parts.append(str(text))
+                            elif block:
+                                body_parts.append(str(block))
+                        body = "\n\n".join(body_parts)
+                    elif isinstance(body, dict):
+                        body = str(body.get("text") or "")
+                    else:
+                        body = str(body or "")
+
+                    slides.append(
+                        {
+                            "template": str(raw_slide.get("template") or ""),
+                            "label": str(raw_slide.get("label") or f"SLIDE {index}"),
+                            "headline": str(headline or ""),
+                            "body": body,
+                            "citation": str(raw_slide.get("citation") or ""),
+                            "image_filename": str(
+                                raw_slide.get("image_filename")
+                                or raw_slide.get("image")
+                                or ""
+                            ),
+                        }
+                    )
+
+    if not slides:
+        slides = [
+            {
+                "template": "cover_headline",
+                "label": "THE JENNI WREN",
+                "headline": "",
+                "body": "",
+                "citation": "",
+                "image_filename": "",
+            },
+            {
+                "template": "signature",
+                "label": "WHAT HAPPENED",
+                "headline": "",
+                "body": "",
+                "citation": "",
+                "image_filename": "",
+            },
+        ]
+
+    return story_title, source, slides
+
+
 def build_page(
     *,
     folder_slug: str = "",
@@ -101,9 +186,66 @@ def build_page(
     build_log: str = "",
     output_slug: str = "",
 ) -> str:
-    """Build the complete dashboard page."""
-    slides_html = ""
+    """Build the Phase 2 structured dashboard page."""
+    story_title, source, form_slides = _slide_form_data(payload)
 
+    slide_cards: list[str] = []
+    for index, slide in enumerate(form_slides):
+        slide_cards.append(
+            """
+            <article class="editor-slide" data-slide>
+                <div class="slide-toolbar">
+                    <strong>Slide <span data-slide-number>{number}</span></strong>
+                    <div class="slide-actions">
+                        <button type="button" class="mini secondary" data-move-up>↑</button>
+                        <button type="button" class="mini secondary" data-move-down>↓</button>
+                        <button type="button" class="mini secondary" data-duplicate>Duplicate</button>
+                        <button type="button" class="mini danger" data-remove>Delete</button>
+                    </div>
+                </div>
+
+                <div class="field-grid">
+                    <div>
+                        <label>Template</label>
+                        <select data-field="template">
+                            {template_options}
+                        </select>
+                    </div>
+                    <div>
+                        <label>Label</label>
+                        <input data-field="label" value="{label}" placeholder="WHAT HAPPENED">
+                    </div>
+                </div>
+
+                <label>Headline</label>
+                <textarea class="headline-box" data-field="headline" placeholder="One headline line per row">{headline}</textarea>
+
+                <label>Body</label>
+                <textarea class="body-box" data-field="body" placeholder="Slide body copy">{body}</textarea>
+
+                <div class="field-grid">
+                    <div>
+                        <label>Citation</label>
+                        <input data-field="citation" value="{citation}" placeholder="AP, July 18, 2026">
+                    </div>
+                    <div>
+                        <label>Image filename</label>
+                        <input data-field="image_filename" value="{image_filename}" placeholder="photo.jpg">
+                    </div>
+                </div>
+            </article>
+            """.format(
+                number=index + 1,
+                template_options=_template_options(slide["template"]),
+                label=html.escape(slide["label"]),
+                headline=html.escape(slide["headline"]),
+                body=html.escape(slide["body"]),
+                citation=html.escape(slide["citation"]),
+                image_filename=html.escape(slide["image_filename"]),
+            )
+        )
+
+    slides_html = ""
     if output_slug:
         cards: list[str] = []
         for image_path in output_images(output_slug):
@@ -119,10 +261,7 @@ def build_page(
                     </a>
                     <div class="slide-name">{name}</div>
                 </article>
-                """.format(
-                    url=image_url,
-                    name=html.escape(image_path.name),
-                )
+                """.format(url=image_url, name=html.escape(image_path.name))
             )
 
         if cards:
@@ -133,243 +272,338 @@ def build_page(
             </section>
             """.format(cards="".join(cards))
 
-    message_html = ""
-    if message:
-        message_html = '<div class="notice">{}</div>'.format(html.escape(message))
-
-    log_html = ""
-    if build_log:
-        log_html = """
-        <section class="results">
-            <h2>Build log</h2>
+    message_html = (
+        '<div class="notice">{}</div>'.format(html.escape(message))
+        if message
+        else ""
+    )
+    log_html = (
+        """
+        <details class="results">
+            <summary>Build log</summary>
             <pre>{}</pre>
-        </section>
+        </details>
         """.format(html.escape(build_log))
+        if build_log
+        else ""
+    )
 
-    return """<!doctype html>
+    page_template = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JenniWren Carousel Dashboard</title>
+<title>JenniWren Studio</title>
 <style>
-:root {{
+:root {
     color-scheme: dark;
-    --pink: #ff0a72;
-    --background: #090909;
-    --panel: #151515;
-    --panel-2: #0d0d0d;
-    --border: #343434;
-    --text: #f7f7f7;
-    --muted: #b8b8b8;
-}}
-
-* {{
-    box-sizing: border-box;
-}}
-
-body {{
-    margin: 0;
-    background: var(--background);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}}
-
-main {{
-    width: min(1180px, calc(100% - 28px));
-    margin: 24px auto 64px;
-}}
-
-header {{
-    border-top: 8px solid var(--pink);
-    padding: 24px 0 14px;
-}}
-
-h1 {{
-    margin: 0;
-    max-width: 850px;
-    font-size: clamp(34px, 7vw, 72px);
-    line-height: 0.92;
-    letter-spacing: -0.03em;
-    text-transform: uppercase;
-}}
-
-h2 {{
-    margin-top: 0;
-}}
-
-p {{
-    color: var(--muted);
-}}
-
-.panel,
-.results {{
-    margin-top: 20px;
-    padding: 18px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-}}
-
-label {{
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 800;
-}}
-
-input,
-textarea {{
-    width: 100%;
-    border: 1px solid #484848;
-    border-radius: 10px;
-    background: var(--panel-2);
-    color: var(--text);
-    padding: 12px;
-    font: inherit;
-}}
-
-textarea {{
-    min-height: 460px;
-    resize: vertical;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 14px;
-    line-height: 1.45;
-}}
-
-.actions {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 14px;
-}}
-
-button {{
-    border: 0;
-    border-radius: 10px;
-    padding: 12px 18px;
-    background: var(--pink);
-    color: white;
-    font: inherit;
-    font-weight: 850;
-    cursor: pointer;
-}}
-
-button.secondary {{
-    background: #333;
-}}
-
-.notice {{
-    margin-top: 18px;
-    padding: 14px 16px;
-    border-left: 5px solid var(--pink);
-    background: #1b1b1b;
-    white-space: pre-wrap;
-}}
-
-pre {{
-    margin: 0;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: #050505;
-}}
-
-.slides {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 18px;
-}}
-
-.slide-card {{
-    overflow: hidden;
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-}}
-
-.slide-card img {{
-    display: block;
-    width: 100%;
-    height: auto;
-}}
-
-.slide-name {{
-    padding: 10px 12px;
-    color: var(--muted);
-    font-size: 14px;
-}}
-
-code {{
-    color: #ff79b5;
-}}
-
-.help {{
-    margin-bottom: 0;
-    font-size: 14px;
-}}
-
-@media (max-width: 700px) {{
-    textarea {{
-        min-height: 360px;
-    }}
-}}
+    --pink:#ff0a72;
+    --bg:#090909;
+    --panel:#151515;
+    --panel2:#0d0d0d;
+    --border:#343434;
+    --text:#f7f7f7;
+    --muted:#b8b8b8;
+    --danger:#8f1d46;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+main { width:min(1180px,calc(100% - 28px)); margin:24px auto 64px; }
+header { border-top:8px solid var(--pink); padding:24px 0 14px; }
+h1 { margin:0; font-size:clamp(36px,7vw,72px); line-height:.92; letter-spacing:-.03em; text-transform:uppercase; }
+h2 { margin:0 0 14px; }
+p { color:var(--muted); }
+.panel,.results { margin-top:20px; padding:18px; background:var(--panel); border:1px solid var(--border); border-radius:14px; }
+label { display:block; margin:13px 0 7px; font-weight:800; }
+input,textarea,select { width:100%; border:1px solid #484848; border-radius:10px; background:var(--panel2); color:var(--text); padding:12px; font:inherit; }
+textarea { resize:vertical; line-height:1.4; }
+.headline-box { min-height:92px; font-weight:750; }
+.body-box { min-height:140px; }
+.field-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.actions,.slide-actions { display:flex; flex-wrap:wrap; gap:9px; }
+.actions { margin-top:18px; }
+button { border:0; border-radius:10px; padding:12px 18px; background:var(--pink); color:#fff; font:inherit; font-weight:850; cursor:pointer; }
+button.secondary { background:#333; }
+button.danger { background:var(--danger); }
+button.mini { padding:7px 10px; font-size:13px; }
+.editor-slide { margin-top:16px; padding:16px; background:#101010; border:1px solid var(--border); border-radius:13px; }
+.slide-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid #2d2d2d; padding-bottom:10px; }
+.notice { margin-top:18px; padding:14px 16px; border-left:5px solid var(--pink); background:#1b1b1b; white-space:pre-wrap; }
+pre { overflow-x:auto; white-space:pre-wrap; padding:14px; background:#050505; border:1px solid var(--border); border-radius:10px; }
+.slides { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:18px; }
+.slide-card { overflow:hidden; background:var(--panel2); border:1px solid var(--border); border-radius:12px; }
+.slide-card img { display:block; width:100%; height:auto; }
+.slide-name { padding:10px 12px; color:var(--muted); font-size:14px; }
+.help { margin-bottom:0; font-size:14px; }
+code { color:#ff79b5; }
+summary { cursor:pointer; font-weight:800; }
+.hidden-json { display:none; }
+@media (max-width:700px) {
+    .field-grid { grid-template-columns:1fr; gap:0; }
+    .slide-toolbar { align-items:flex-start; flex-direction:column; }
+}
 </style>
 </head>
 <body>
 <main>
 <header>
-    <h1>JenniWren Carousel Dashboard</h1>
-    <p>Paste a complete <code>carousel.json</code>, save it, and render the PNGs.</p>
+    <h1>JenniWren Studio</h1>
+    <p>Build the carousel with forms. The dashboard creates the JSON for you.</p>
 </header>
 
+<form id="studio-form" method="post" action="/render">
 <section class="panel">
-    <form method="post" action="/render">
-        <label for="folder_slug">Story folder name</label>
-        <input
-            id="folder_slug"
-            name="folder_slug"
-            value="{folder_slug}"
-            placeholder="musk-political-spending"
-            required
-        >
+    <h2>Story</h2>
 
-        <div style="height: 16px"></div>
-
-        <label for="payload">carousel.json</label>
-        <textarea
-            id="payload"
-            name="payload"
-            spellcheck="false"
-            required
-        >{payload}</textarea>
-
-        <div class="actions">
-            <button type="submit">Save &amp; Render</button>
-            <button class="secondary" type="submit" formaction="/save">Save only</button>
+    <div class="field-grid">
+        <div>
+            <label for="folder_slug">Story folder name</label>
+            <input id="folder_slug" name="folder_slug" value="__FOLDER__" placeholder="musk-political-spending" required>
         </div>
-    </form>
+        <div>
+            <label for="story_title">Story title</label>
+            <input id="story_title" value="__STORY__" placeholder="Elon Musk's political spending" required>
+        </div>
+    </div>
 
-    <p class="help">
-        Story files are saved under
-        <code>stories/&lt;folder-name&gt;/carousel.json</code>.
-    </p>
+    <label for="source">Source</label>
+    <input id="source" value="__SOURCE__" placeholder="Associated Press, July 18, 2026">
+
+    <p class="help">The first slide is the cover. Add, duplicate, delete, or reorder slides below.</p>
 </section>
 
-{message}
-{build_log}
-{slides}
+<section class="panel">
+    <div class="slide-toolbar">
+        <h2>Slides</h2>
+        <button type="button" id="add-slide">+ Add slide</button>
+    </div>
+
+    <div id="slide-editor">
+        __EDITOR_SLIDES__
+    </div>
+</section>
+
+<input type="hidden" id="payload" name="payload">
+
+<div class="actions">
+    <button type="submit">Save &amp; Render</button>
+    <button type="submit" class="secondary" formaction="/save">Save only</button>
+    <button type="button" class="secondary" id="show-json">Preview JSON</button>
+</div>
+</form>
+
+<section id="json-panel" class="results hidden-json">
+    <h2>Generated carousel.json</h2>
+    <pre id="json-preview"></pre>
+</section>
+
+__MESSAGE__
+__LOG__
+__RENDERED__
+
+<template id="slide-template">
+<article class="editor-slide" data-slide>
+    <div class="slide-toolbar">
+        <strong>Slide <span data-slide-number></span></strong>
+        <div class="slide-actions">
+            <button type="button" class="mini secondary" data-move-up>↑</button>
+            <button type="button" class="mini secondary" data-move-down>↓</button>
+            <button type="button" class="mini secondary" data-duplicate>Duplicate</button>
+            <button type="button" class="mini danger" data-remove>Delete</button>
+        </div>
+    </div>
+
+    <div class="field-grid">
+        <div>
+            <label>Template</label>
+            <select data-field="template">__ALL_TEMPLATE_OPTIONS__</select>
+        </div>
+        <div>
+            <label>Label</label>
+            <input data-field="label" placeholder="WHAT HAPPENED">
+        </div>
+    </div>
+
+    <label>Headline</label>
+    <textarea class="headline-box" data-field="headline" placeholder="One headline line per row"></textarea>
+
+    <label>Body</label>
+    <textarea class="body-box" data-field="body" placeholder="Slide body copy"></textarea>
+
+    <div class="field-grid">
+        <div>
+            <label>Citation</label>
+            <input data-field="citation" placeholder="AP, July 18, 2026">
+        </div>
+        <div>
+            <label>Image filename</label>
+            <input data-field="image_filename" placeholder="photo.jpg">
+        </div>
+    </div>
+</article>
+</template>
+
+<script>
+const editor = document.getElementById("slide-editor");
+const form = document.getElementById("studio-form");
+const payloadInput = document.getElementById("payload");
+const jsonPanel = document.getElementById("json-panel");
+const jsonPreview = document.getElementById("json-preview");
+
+function renumberSlides() {
+    [...editor.querySelectorAll("[data-slide]")].forEach((slide, index) => {
+        slide.querySelector("[data-slide-number]").textContent = index + 1;
+    });
+}
+
+function field(slide, name) {
+    return slide.querySelector(`[data-field="${name}"]`).value.trim();
+}
+
+function buildPayload() {
+    const slides = [...editor.querySelectorAll("[data-slide]")].map((slide, index) => {
+        const headline = field(slide, "headline");
+        const body = field(slide, "body");
+        const citation = field(slide, "citation");
+        const imageFilename = field(slide, "image_filename");
+
+        const item = {
+            template: field(slide, "template"),
+            label: field(slide, "label") || `SLIDE ${index + 1}`,
+            headline_lines: headline
+                .split(/\n+/)
+                .map(line => line.trim())
+                .filter(Boolean),
+            headline_colors: ["white"],
+            body: body ? [{text: body}] : []
+        };
+
+        if (citation) item.citation = citation;
+        if (imageFilename) item.image_filename = imageFilename;
+        return item;
+    });
+
+    return {
+        story: document.getElementById("story_title").value.trim(),
+        source: document.getElementById("source").value.trim(),
+        slides
+    };
+}
+
+function syncPayload() {
+    const payload = buildPayload();
+    payloadInput.value = JSON.stringify(payload, null, 2);
+    jsonPreview.textContent = payloadInput.value;
+}
+
+document.getElementById("add-slide").addEventListener("click", () => {
+    const fragment = document.getElementById("slide-template").content.cloneNode(true);
+    editor.appendChild(fragment);
+    renumberSlides();
+});
+
+editor.addEventListener("click", event => {
+    const button = event.target.closest("button");
+    if (!button) return;
+
+    const slide = button.closest("[data-slide]");
+    if (!slide) return;
+
+    if (button.matches("[data-remove]")) {
+        if (editor.querySelectorAll("[data-slide]").length === 1) {
+            alert("A carousel needs at least one slide.");
+            return;
+        }
+        slide.remove();
+    }
+
+    if (button.matches("[data-duplicate]")) {
+        slide.after(slide.cloneNode(true));
+    }
+
+    if (button.matches("[data-move-up]") && slide.previousElementSibling) {
+        editor.insertBefore(slide, slide.previousElementSibling);
+    }
+
+    if (button.matches("[data-move-down]") && slide.nextElementSibling) {
+        editor.insertBefore(slide.nextElementSibling, slide);
+    }
+
+    renumberSlides();
+});
+
+document.getElementById("show-json").addEventListener("click", () => {
+    syncPayload();
+    jsonPanel.classList.toggle("hidden-json");
+});
+
+form.addEventListener("submit", event => {
+    syncPayload();
+
+    if (!buildPayload().slides.length) {
+        event.preventDefault();
+        alert("Add at least one slide.");
+    }
+});
+
+renumberSlides();
+syncPayload();
+</script>
 </main>
 </body>
 </html>
-""".format(
-        folder_slug=html.escape(folder_slug),
-        payload=html.escape(payload),
-        message=message_html,
-        build_log=log_html,
-        slides=slides_html,
+"""
+
+    return (
+        page_template
+        .replace("__FOLDER__", html.escape(folder_slug))
+        .replace("__STORY__", html.escape(story_title))
+        .replace("__SOURCE__", html.escape(source))
+        .replace("__EDITOR_SLIDES__", "".join(slide_cards))
+        .replace("__MESSAGE__", message_html)
+        .replace("__LOG__", log_html)
+        .replace("__RENDERED__", slides_html)
+        .replace("__ALL_TEMPLATE_OPTIONS__", _template_options("signature"))
     )
+
+
+def _template_options(selected: str) -> str:
+    """Return the current Phase 2 template menu."""
+    templates = [
+        ("cover_headline", "Cover — Headline"),
+        ("cover_feature", "Cover — Feature"),
+        ("cover_quote", "Cover — Quote Lead"),
+        ("cover_primary_source", "Cover — Primary Source"),
+        ("cover_political_stakes", "Cover — Political Stakes"),
+        ("cover_big_number", "Cover — Big Number"),
+        ("cover_compare", "Cover — Contrast / Compare"),
+        ("cover_newspaper", "Cover — Newspaper Front Page"),
+        ("signature", "Interior — Signature"),
+        ("timeline", "Interior — Timeline"),
+        ("quote", "Interior — Quote"),
+        ("document_evidence", "Interior — Document Evidence"),
+        ("big_number", "Interior — Big Number"),
+        ("split", "Interior — Split"),
+        ("comparison", "Interior — Comparison"),
+        ("investigation_tracker", "Interior — Investigation Tracker"),
+        ("decision_tree", "Interior — Decision Tree"),
+        ("network_map", "Interior — Network Map"),
+        ("org_chart", "Interior — Org Chart"),
+        ("follow_connection", "Interior — Follow the Connection"),
+        ("cta", "Final — CTA"),
+    ]
+
+    parts: list[str] = []
+    for value, label in templates:
+        selected_attr = " selected" if value == selected else ""
+        parts.append(
+            '<option value="{}"{}>{}</option>'.format(
+                html.escape(value),
+                selected_attr,
+                html.escape(label),
+            )
+        )
+    return "".join(parts)
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
