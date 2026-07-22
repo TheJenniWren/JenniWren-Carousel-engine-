@@ -73,7 +73,8 @@ QAReport = qa.QAReport
 QARule = qa.QARule
 QAEngine = qa.QAEngine
 
-RendererContext = renderer.RendererContext
+RenderContext = renderer.RenderContext
+RendererContext = RenderContext
 
 __all__ = [
     "RendererUnavailableError",
@@ -88,5 +89,6 @@ __all__ = [
     "QAReport",
     "QARule",
     "QAEngine",
+    "RenderContext",
     "RendererContext",
 ]
