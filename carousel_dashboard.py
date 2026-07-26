@@ -2428,6 +2428,46 @@ function currentValidationReport(index=0){
   );
 }
 
+
+function validateData(data){
+  const report=emptyValidationReport();
+
+  if(!data || typeof data!=="object" || Array.isArray(data)){
+    report.errors.push("Carousel package must be a JSON object.");
+    return report;
+  }
+
+  if(!String(data.story||"").trim()){
+    report.story.push("Story title");
+  }
+
+  if(!String(data.source||"").trim()){
+    report.source.push("Primary source");
+  }
+
+  if(!Array.isArray(data.slides) || data.slides.length===0){
+    report.errors.push("At least one slide is required.");
+    return report;
+  }
+
+  report.slides=data.slides.map((slide,index)=>{
+    const missing=[];
+    if(!slide || typeof slide!=="object"){
+      missing.push("Invalid slide data");
+      return {index:index,template:"unknown",missing:missing};
+    }
+    if(!String(slide.template||"").trim())missing.push("Template");
+    if(!String(slide.label||"").trim())missing.push("Label");
+    return {
+      index:index,
+      template:String(slide.template||"unknown"),
+      missing:missing
+    };
+  });
+
+  return normalizeValidationReport(report,0);
+}
+
 function flatErrors(report){
   report=normalizeValidationReport(report,0);
   const errors=[];
