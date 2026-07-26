@@ -10,7 +10,7 @@ from typing import Sequence
 
 from exporter import ExportError, export_image
 from production_config import ProductionConfig
-from story_loader import StoryLoaderError, load_story
+from story_loader import StoryLoadError, load_story
 from templates import TemplateError, render_slide
 
 LOGGER = logging.getLogger("jenniwren.launcher")
@@ -77,11 +77,14 @@ def render_carousel(
 
     try:
         story = load_story(story_dir)
-    except (StoryLoaderError, OSError, ValueError) as exc:
+    except (StoryLoadError, OSError, ValueError) as exc:
         LOGGER.error("Could not load story: %s", exc)
         return 1
 
-    config = ProductionConfig()
+    config = ProductionConfig(
+        story_dir=story_dir,
+        output_dir=output_dir,
+    )
     total = len(story.slides)
     if total == 0:
         LOGGER.error("Story contains no slides.")

@@ -2355,6 +2355,51 @@ function normalizeValidationReport(report,index=0){
   return normalized;
 }
 
+function validateData(data){
+  const report=emptyValidationReport();
+
+  if(!data || typeof data!=="object"){
+    report.errors.push("Carousel JSON must be an object.");
+    return report;
+  }
+
+  if(!Array.isArray(data.slides)){
+    report.errors.push("Carousel JSON must contain a slides array.");
+    return report;
+  }
+
+  if(data.slides.length===0){
+    report.errors.push("Carousel must contain at least one slide.");
+  }
+
+  data.slides.forEach((slide,index)=>{
+    if(!slide || typeof slide!=="object"){
+      report.slides[index]={
+        missing:["slide data"],
+        template:"unknown"
+      };
+      return;
+    }
+
+    const missing=[];
+    if(!slide.template) missing.push("template");
+
+    report.slides[index]={
+      missing,
+      template:slide.template || "unknown"
+    };
+  });
+
+  report.missing=[
+    ...report.story,
+    ...report.source,
+    ...report.errors,
+    ...report.slides.flatMap(slide=>slide.missing || [])
+  ];
+
+  return report;
+}
+
 async function validateEditorState(selectedIndex=0){
   const response=await fetch("/validate",{
     method:"POST",
@@ -3203,7 +3248,15 @@ document.getElementById("import-json-button").addEventListener("click",()=>{
     const errors=flatErrors(report);
     if(errors.length){showImportStatus(errors.join("\n"),"error");return}
     populateFromData(data);
-    const suggested=(data.folder_slug||data.slug||data.story||"story").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+    const storyObj=(data.story&&typeof data.story==="object") ? data.story : {};
+const suggested=(
+  data.folder_slug ||
+  data.slug ||
+  storyObj.folder_slug ||
+  storyObj.title ||
+  (typeof data.story==="string" ? data.story : "") ||
+  "story"
+).toString().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
     if(suggested)document.getElementById("folder_slug").value=suggested;
     showImportStatus(`Imported ${data.slides.length} slides. Review or edit, then Render Full Carousel.`,"success");
     selectSlide(0,{render:false});
@@ -3292,7 +3345,6 @@ class StudioHandler(BaseHTTPRequestHandler):
         encoded = content.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Disposition", "inline")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
@@ -3322,7 +3374,6 @@ class StudioHandler(BaseHTTPRequestHandler):
             content = build_page(data=default_story()).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Disposition", "inline")
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
@@ -3337,7 +3388,6 @@ class StudioHandler(BaseHTTPRequestHandler):
             ).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Disposition", "inline")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
@@ -3363,7 +3413,6 @@ class StudioHandler(BaseHTTPRequestHandler):
                 return
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "image/png")
-            self.send_header("Content-Disposition", "inline")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(path.stat().st_size))
             self.end_headers()
