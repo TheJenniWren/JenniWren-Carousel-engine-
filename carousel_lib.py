@@ -1006,213 +1006,94 @@ def draw_document_card(draw, img, lines, highlight_line_idxs, ty,
 
 # ── DYNAMIC-HEIGHT TIMELINE ────────────────────────────────────────────────
 def draw_timeline(draw, entries, y0, line_x=None):
-    """
-    Vertical timeline with connector line, circle nodes, year/era
-    labels, pink sub-heading, and white description per entry —
-    dynamic height per entry based on how many lines the description
-    wraps to.
+    """Timeline v3.8.20 with stronger body weight and slightly higher placement."""
+    TIMELINE_DATE_SIZE = 48
+    TIMELINE_BODY_SIZE = 46
+    TIMELINE_BODY_LINE_ADVANCE = 56
+    TIMELINE_MAX_W = 800
+    TIMELINE_LINE_WIDTH = 5
+    TIMELINE_NODE_RADIUS = 11
+    TIMELINE_TOP_OFFSET = 52
+    TIMELINE_MAX_SPAN = 380
 
-    entries: list of dicts, each with:
-        "year": str — e.g. "2018" or "NOW"
-        "heading": str — pink sub-heading, e.g. "Family separations begin."
-        "desc": str — white description, wrapped automatically
-    y0: top y of the first node.
-    line_x: x position of the vertical connector line/nodes. Defaults
-    to BODY_L + 40.
+    line_x = line_x or (BODY_L + 50)
+    text_x = line_x + 78
+    text_w = min(TIMELINE_MAX_W, W - R_MARGIN - text_x)
 
-    Returns the y-pixel where the timeline ends (last entry's bottom).
-    """
-    if not entries:
+    date_font = lf(BARLOW, TIMELINE_DATE_SIZE)
+    body_font = lf(BASK_REG, TIMELINE_BODY_SIZE)
+
+    normalized = []
+    for entry in entries:
+        date_text = str(entry.get("date") or entry.get("year") or "").strip()
+        heading_text = str(entry.get("heading") or "").strip()
+        body_text = str(entry.get("text") or entry.get("desc") or "").strip()
+
+        if not body_text and heading_text:
+            body_text = heading_text
+        elif heading_text and body_text and not body_text.startswith(heading_text):
+            body_text = f"{heading_text} {body_text}"
+
+        if date_text or body_text:
+            normalized.append((date_text, body_text))
+
+    if not normalized:
         return y0
 
-    line_x = line_x or (BODY_L + 40)
-    text_x = line_x + 70
-    text_w = W - R_MARGIN - text_x
-    node_r = 9
+    start_y = y0 + TIMELINE_TOP_OFFSET
+    available_to_footer = max(1, FOOTER_SAFE - 120 - start_y)
+    span = min(TIMELINE_MAX_SPAN, available_to_footer)
 
-    year_font = lf(BARLOW, 38)
-    heading_font = lf(BARLOW, 32)
-    desc_font = lf(BASK_REG, 28)
-    asc_d, desc_d = desc_font.getmetrics()
-    desc_lh = int((asc_d + desc_d) * 1.25)
-
-    y = y0
-    line_top = y0
-    entry_positions = []
-
-    for e in entries:
-        entry_top = y
-
-        date_text = str(e.get("date") or e.get("year") or "")
-        heading_text = str(e.get("heading") or "")
-        desc_text = str(e.get("desc") or e.get("text") or "")
-
-        draw.text((text_x, y), date_text, font=year_font, fill=WHITE)
-        y += year_font.size + 10
-
-        if heading_text:
-            draw.text((text_x, y), heading_text, font=heading_font, fill=PINK)
-            y += heading_font.size + 8
-
-        desc_lines = wrap_lines(draw, [(desc_text, WHITE)], desc_font, text_w)
-        space_w = mw(draw, ' ', desc_font)
-        for lwords in desc_lines:
-            x = text_x
-            for i, (word, col) in enumerate(lwords):
-                draw.text((x, y), word, font=desc_font, fill=col)
-                x += mw(draw, word, desc_font)
-                if i < len(lwords) - 1:
-                    x += space_w
-            y += desc_lh
-
-        node_cy = entry_top + year_font.size // 2
-        entry_positions.append(node_cy)
-        y += 34  # gap before next entry
-
-    line_bottom = y - 34
-    draw.line([(line_x, line_top + year_font.size // 2), (line_x, line_bottom)],
-               fill=PINK, width=3)
-    for cy in entry_positions:
-        draw.ellipse([line_x - node_r, cy - node_r, line_x + node_r, cy + node_r],
-                      outline=PINK, width=4, fill=BG)
-
-    return y
-
-
-# ── NEW TYPOGRAPHY HELPERS (v3.7.2) ─────────────────────────────────────
-# Additive only. These delegate all wrapping/fitting/widow-relief to
-# text_fitting_engine.py rather than re-implementing it, per the v3.7.2
-# text-engine integration requirement. No existing template call site
-# depends on them, and no function above has been changed to call them.
-# If the text engine isn't importable for some reason, each helper below
-# degrades to a harmless no-op (returns the input y-cursor unchanged)
-# rather than raising.
-
-def _font_loader_factory(path):
-    """Return a font_loader callable (size -> font) bound to a font path,
-    routed through the cached lf() so repeated sizes aren't reloaded."""
-    def _load(size: int):
-        return lf(path, size)
-    return _load
-
-
-def draw_pull_quote(draw, quote_text: str, ty: int, attribution: str = "",
-                     max_width: Optional[int] = None, box_height: int = 260,
-                     size_range: Tuple[int, int] = (40, 88)) -> int:
-    """
-    Editorial pull quote in Baskerville Italic, auto-fit via
-    text_fitting_engine. Optional small attribution line beneath in
-    Barlow. Returns the y-pixel where the block ends.
-    """
-    if _te_draw_fitted_text is None or not quote_text:
-        return ty
-
-    max_width = max_width or (W - BODY_L - BODY_R)
-    box = (BODY_L, ty, BODY_L + max_width, ty + box_height)
-    result = _te_draw_fitted_text(
-        draw, box, f"\u201c{quote_text}\u201d",
-        _font_loader_factory(BASK_ITA),
-        fill=WHITE, align="center", valign="top",
-        start_size=size_range[1], min_size=size_range[0],
-    )
-    y = ty + result["height"]
-
-    if attribution:
-        attr_font = lf(BARLOW, 26)
-        abb = draw.textbbox((0, 0), attribution, font=attr_font)
-        aw = abb[2] - abb[0]
-        ax = BODY_L + (max_width - aw) // 2
-        draw.text((ax, y + 16), attribution, font=attr_font, fill=PINK)
-        y += 16 + attr_font.size
-
-    return y
-
-
-def draw_label(draw, text: str, x: int, y: int, fsz: int = 28,
-               color=WHITE, bg=None, pad: int = 12) -> Tuple[int, int, int, int]:
-    """
-    Small standalone label/eyebrow text, optionally on a solid
-    background pill. Returns (x, y, width, height) of the drawn block.
-    """
-    if not text:
-        return (x, y, 0, 0)
-
-    font = lf(BARLOW, fsz)
-    if _te_measure_lines is not None:
-        w, h, _ = _te_measure_lines(draw, [text], font, line_spacing=0)
+    if len(normalized) == 1:
+        anchors = [start_y]
     else:
-        bb = draw.textbbox((0, 0), text, font=font)
-        w, h = bb[2] - bb[0], bb[3] - bb[1]
+        anchors = [
+            round(start_y + span * i / (len(normalized) - 1))
+            for i in range(len(normalized))
+        ]
 
-    if bg is not None:
-        draw.rectangle([x, y, x + w + pad * 2, y + h + pad * 2], fill=bg)
-        draw.text((x + pad, y + pad), text, font=font, fill=color)
-        return (x, y, w + pad * 2, h + pad * 2)
+    node_centers = []
 
-    draw.text((x, y), text, font=font, fill=color)
-    return (x, y, w, h)
+    for anchor_y, (date_text, body_text) in zip(anchors, normalized):
+        draw.text((text_x, anchor_y), date_text, font=date_font, fill=PINK)
+        date_bbox = draw.textbbox((text_x, anchor_y), date_text, font=date_font)
+        date_height = max(1, date_bbox[3] - date_bbox[1])
+        body_y = date_bbox[3] + 8
 
+        lines = wrap_lines(draw, [(body_text, WHITE)], body_font, text_w)
+        space_w = mw(draw, " ", body_font)
 
-def draw_source_tag(draw, source_text: str, y: Optional[int] = None, fsz: int = 22) -> int:
-    """
-    Small italic source attribution, right-aligned above the footer
-    zone (e.g. "Source: DHS FOIA release, June 2026"). Returns the
-    y-pixel of the tag's top.
-    """
-    if not source_text:
-        return y if y is not None else FOOTER_SAFE
+        for line_words in lines:
+            x = text_x
+            for idx, (word, color) in enumerate(line_words):
+                draw.text((x, body_y), word, font=body_font, fill=color)
+                x += mw(draw, word, body_font)
+                if idx < len(line_words) - 1:
+                    x += space_w
+            body_y += TIMELINE_BODY_LINE_ADVANCE
 
-    y = y if y is not None else (FOOTER_SAFE - 34)
-    font = lf(BASK_ITA, fsz)
-    bb = draw.textbbox((0, 0), source_text, font=font)
-    tw = bb[2] - bb[0]
-    x = W - R_MARGIN - tw
-    draw.text((x, y), source_text, font=font, fill=(160, 160, 160))
-    return y
+        node_centers.append(anchor_y + date_height // 2)
 
-
-def draw_cta_text(draw, text: str, ty: int, fsz_range: Tuple[int, int] = (40, 64),
-                   bg=PINK, text_color=WHITE, pad: int = 32) -> int:
-    """
-    Full-width call-to-action bar (e.g. "FOLLOW FOR MORE"), auto-fit via
-    text_fitting_engine. Returns the y-pixel where the block ends.
-    """
-    if _te_fit_text is None or _te_measure_lines is None or not text:
-        return ty
-
-    max_w = W - 2 * L_MARGIN - 2 * pad
-    font, lines, _size = _te_fit_text(
-        draw, text, _font_loader_factory(BARLOW), max_w, 200,
-        start_size=fsz_range[1], min_size=fsz_range[0],
+    draw.line(
+        [(line_x, node_centers[0]), (line_x, node_centers[-1])],
+        fill=PINK,
+        width=TIMELINE_LINE_WIDTH,
     )
-    _width, height, line_h = _te_measure_lines(draw, lines, font, line_spacing=4)
-    block_h = pad * 2 + height
 
-    draw.rectangle([L_MARGIN, ty, W - R_MARGIN, ty + block_h], fill=bg)
-    y = ty + pad
-    for line in lines:
-        lbb = draw.textbbox((0, 0), line, font=font)
-        lw = lbb[2] - lbb[0]
-        x = L_MARGIN + ((W - 2 * L_MARGIN) - lw) // 2
-        draw.text((x, y), line, font=font, fill=text_color)
-        y += line_h + 4
-    return ty + block_h
+    for cy in node_centers:
+        draw.ellipse(
+            [
+                line_x - TIMELINE_NODE_RADIUS,
+                cy - TIMELINE_NODE_RADIUS,
+                line_x + TIMELINE_NODE_RADIUS,
+                cy + TIMELINE_NODE_RADIUS,
+            ],
+            outline=PINK,
+            width=TIMELINE_LINE_WIDTH,
+            fill=BG,
+        )
 
-
-# ── COMPATIBILITY NOTES (v3.7.2) ─────────────────────────────────────────
-# wrap_lines(), fit_head(), fit_head_custom(), draw_headline(), and
-# draw_body() remain the canonical, pixel-tuned implementations for every
-# existing template call site and are intentionally NOT rewritten to call
-# text_fitting_engine.py - doing so would change their fitting behavior
-# and break current template output. New template work that wants the
-# editorial composition engine directly should use the helpers in the
-# "NEW TYPOGRAPHY HELPERS" section above, or text_fitting_engine.py itself.
-
-def text_engine_available() -> bool:
-    """True if text_fitting_engine.py imported successfully. New helpers
-    above already check this internally and no-op gracefully if False;
-    exposed for callers that want to branch on it themselves."""
-    return _te_fit_text is not None
+    return start_y + span
 
 
 # ── EXAMPLE SLIDE BUILDS (reference patterns — copy these structures) ──────
