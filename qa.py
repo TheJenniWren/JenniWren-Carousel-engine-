@@ -9,7 +9,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, List
 
-from .renderer import RenderContext
+try:
+    from .renderer import RenderContext
+except ImportError:
+    from renderer import RenderContext
 
 
 class Severity(Enum):

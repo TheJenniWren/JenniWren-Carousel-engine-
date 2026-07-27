@@ -29,13 +29,13 @@ from production_config import ProductionConfig
 from story_loader import StorySlide, StoryPackage
 from template_shared import TemplateError, COLOR_MAP  # re-exported for convenience/back-compat
 
-from cover_templates_original import render_cover_headline, render_quote_lead, render_photo_headline
+from cover_templates import render_cover_headline, render_quote_lead, render_photo_headline
 from data_templates import render_stat_callout, render_stat_grid
 from timeline_templates import render_timeline
 from comparison_templates import render_call_block
 from document_templates import render_document_card
 from explainer_templates import render_body_standard
-from explainer_templates_original import render_sources_slide
+from explainer_templates import render_sources_slide
 
 __all__ = [
     "TemplateError", "COLOR_MAP", "RENDER_FUNCS", "REQUIRED_FIELDS", "KNOWN_FIELDS",

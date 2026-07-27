@@ -1042,13 +1042,19 @@ def draw_timeline(draw, entries, y0, line_x=None):
 
     for e in entries:
         entry_top = y
-        draw.text((text_x, y), e["year"], font=year_font, fill=WHITE)
+
+        date_text = str(e.get("date") or e.get("year") or "")
+        heading_text = str(e.get("heading") or "")
+        desc_text = str(e.get("desc") or e.get("text") or "")
+
+        draw.text((text_x, y), date_text, font=year_font, fill=WHITE)
         y += year_font.size + 10
 
-        draw.text((text_x, y), e["heading"], font=heading_font, fill=PINK)
-        y += heading_font.size + 8
+        if heading_text:
+            draw.text((text_x, y), heading_text, font=heading_font, fill=PINK)
+            y += heading_font.size + 8
 
-        desc_lines = wrap_lines(draw, [(e["desc"], WHITE)], desc_font, text_w)
+        desc_lines = wrap_lines(draw, [(desc_text, WHITE)], desc_font, text_w)
         space_w = mw(draw, ' ', desc_font)
         for lwords in desc_lines:
             x = text_x

@@ -34,7 +34,10 @@ about it - nothing existing is removed or renamed):
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from .registry import get_registry
+try:
+    from .registry import get_registry
+except ImportError:
+    from registry import get_registry
 
 try:
     # Text measurement/fitting is owned entirely by the text engine; the
