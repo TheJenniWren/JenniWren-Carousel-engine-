@@ -1,0 +1,83 @@
+{
+  "story": "The Price Tag",
+  "title": "The Price Tag",
+  "folder_slug": "the-price-tag",
+  "source": "JenniWren Studio internal template test",
+  "slides": [
+    {
+      "template": "cover_headline",
+      "label": "THE PRICE TAG",
+      "headline_range": [
+        72,
+        180
+      ],
+      "body_size": 62,
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio internal template test",
+      "headline_lines": [
+        "THE BILL",
+        "COMES DUE"
+      ],
+      "headline_colors": [
+        "white",
+        "pink"
+      ],
+      "body": [
+        {
+          "text": "A template test for large-number storytelling."
+        }
+      ]
+    },
+    {
+      "template": "stat_callout",
+      "label": "THE NUMBER",
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio internal template test",
+      "stat_text": "$292M",
+      "stat_label": "THREE-YEAR HOUSING CONTRACT",
+      "headline_lines": [
+        "FOR NATIONAL GUARD TROOPS",
+        "IN WASHINGTON, D.C."
+      ],
+      "headline_colors": [
+        "white",
+        "pink"
+      ]
+    },
+    {
+      "template": "body_standard",
+      "label": "WHAT IT MEANS",
+      "headline_range": [
+        72,
+        180
+      ],
+      "body_size": 62,
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio internal template test",
+      "headline_lines": [
+        "THE COST",
+        "IS THE STORY"
+      ],
+      "headline_colors": [
+        "white",
+        "pink"
+      ],
+      "body": [
+        {
+          "text": "Large numbers need context. The slide should make the amount feel immediate, legible, and politically meaningful."
+        }
+      ]
+    },
+    {
+      "template": "sources_slide",
+      "label": "SOURCES",
+      "arrow": false,
+      "citations": [
+        "JenniWren Studio internal template test"
+      ]
+    }
+  ]
+}
