@@ -995,60 +995,140 @@ def draw_check(draw, cx, cy, size=32, ok=False, color=None):
 
 # ── DOCUMENT EVIDENCE CARD ────────────────────────────────────────────────
 def draw_document_card(draw, img, lines, highlight_line_idxs, ty,
-                        card_h=520, annotation=True):
-    """
-    Torn-paper document excerpt card with a pink highlight behind key
-    line(s) and an optional curved arrow annotation pointing at the
-    highlight.
-
-    img: the PIL Image being drawn on (needed to paste the card, since
-    the torn-paper texture is a flat-color placeholder rather than an
-    actual texture asset — swap in a real torn-paper PNG if available).
-    lines: list of strings, the document text, already pre-wrapped by
-    the caller (short excerpt — this function does not re-wrap, since
-    document text usually needs precise, deliberate line breaks
-    matching the real document's formatting).
-    highlight_line_idxs: set/list of line indices (0-based) to render
-    with a pink highlight bar behind them.
-    ty: top y of the card.
-    card_h: card height — dynamic sizing based on `lines` count is left
-    to the caller.
-    annotation: draw the pink curved arrow pointing at the first
-    highlighted line.
-
-    Returns the y-pixel where the card ends.
-    """
+                        card_h=472, annotation=True):
+    """Evidence — Document Card v3.8.34."""
     lines = lines or []
-    highlight_line_idxs = highlight_line_idxs or set()
-    card_h = max(card_h, 1)
+    highlight_line_idxs = set(highlight_line_idxs or [])
 
-    draw = ImageDraw.Draw(img)
-    card_bg = (240, 236, 227)  # aged paper tone — off-white, not pure white
-    card_x0, card_x1 = L_MARGIN, W - R_MARGIN
-    draw.rectangle([card_x0, ty, card_x1, ty + card_h], fill=card_bg)
+    normalized = []
+    for item in lines:
+        if isinstance(item, str):
+            text = item
+        elif isinstance(item, dict):
+            text = str(item.get("text") or item.get("line") or item.get("content") or "")
+        elif isinstance(item, (list, tuple)):
+            text = str(item[0]) if item else ""
+        else:
+            text = str(item)
+        if text.strip():
+            normalized.append(text.strip())
 
-    doc_font = lf(BASK_REG, 30)
-    text_color = (20, 20, 20)
-    pad = 40
-    y = ty + pad
-    asc, desc = doc_font.getmetrics()
-    lh = int((asc + desc) * 1.25)
+    card_x0 = L_MARGIN + 54
+    card_x1 = W - R_MARGIN - 54
+    card_w = card_x1 - card_x0
+    card_h = max(438, int(card_h or 472))
 
-    for i, line in enumerate(lines):
-        lbb = draw.textbbox((0, 0), line, font=doc_font)
-        lw = lbb[2] - lbb[0]
-        if i in highlight_line_idxs:
-            draw.rectangle([card_x0 + pad - 8, y - 4, card_x0 + pad + lw + 8, y + lh - 8],
-                            fill=(255, 170, 195))
-        draw.text((card_x0 + pad, y), line, font=doc_font, fill=text_color)
-        y += lh
+    paper = (246, 242, 232)
+    paper_back = (227, 221, 211)
+    paper_edge = (194, 188, 176)
+    ink = (28, 28, 28)
+    muted = (92, 92, 92)
+    highlight = (247, 208, 72)
 
-    if annotation and highlight_line_idxs:
-        first_hl = min(highlight_line_idxs)
-        ay = ty + pad + lh * first_hl + lh // 2
-        ax = card_x0 + 15
-        draw.line([(ax - 60, ay + 50), (ax - 10, ay)], fill=PINK, width=5)
-        draw.polygon([(ax - 10, ay), (ax - 22, ay - 6), (ax - 18, ay + 10)], fill=PINK)
+    draw.polygon(
+        [(card_x0 + 22, ty + 6), (card_x1 + 6, ty + 18),
+         (card_x1 - 2, ty + card_h + 10), (card_x0 + 10, ty + card_h - 2)],
+        fill=paper_back,
+    )
+    draw.polygon(
+        [(card_x0, ty + 18), (card_x1 - 20, ty),
+         (card_x1, ty + card_h - 16), (card_x0 + 18, ty + card_h)],
+        fill=paper,
+        outline=paper_edge,
+    )
+
+    left = card_x0 + 52
+    right = card_x1 - 52
+    center = (left + right) // 2
+
+    masthead_font = lf(BARLOW, 24)
+    small_font = lf(BARLOW, 19)
+    title_font = lf(BARLOW, 31)
+    body_font = lf(BASK_REG, 29)
+    note_font = lf(BARLOW, 22)
+
+    masthead = "OFFICIAL RECORD"
+    mb = draw.textbbox((0, 0), masthead, font=masthead_font)
+    draw.text((center - (mb[2] - mb[0]) // 2, ty + 42), masthead,
+              font=masthead_font, fill=ink)
+    agency = "UNITED STATES GOVERNMENT"
+    ab = draw.textbbox((0, 0), agency, font=small_font)
+    draw.text((center - (ab[2] - ab[0]) // 2, ty + 72), agency,
+              font=small_font, fill=muted)
+    draw.line((left, ty + 104, right, ty + 104), fill=paper_edge, width=2)
+
+    date_text = "DOCUMENT EXCERPT"
+    db = draw.textbbox((0, 0), date_text, font=small_font)
+    draw.text((center - (db[2] - db[0]) // 2, ty + 118), date_text,
+              font=small_font, fill=muted)
+
+    decision = "KEY CONTRACT TERMS"
+    tb = draw.textbbox((0, 0), decision, font=title_font)
+    draw.text((center - (tb[2] - tb[0]) // 2, ty + 152), decision,
+              font=title_font, fill=ink)
+
+    focus_idx = min(highlight_line_idxs) if highlight_line_idxs else 0
+    focus_idx = min(max(focus_idx, 0), max(0, len(normalized) - 1))
+    focus = normalized[focus_idx] if normalized else "Document evidence"
+
+    max_focus_w = int(card_w * 0.50)
+    focus_lines = []
+    current = ""
+    for word in focus.split():
+        trial = f"{current} {word}".strip()
+        bb = draw.textbbox((0, 0), trial, font=body_font)
+        if current and bb[2] - bb[0] > max_focus_w:
+            focus_lines.append(current)
+            current = word
+        else:
+            current = trial
+    if current:
+        focus_lines.append(current)
+    focus_lines = focus_lines[:3]
+
+    asc, desc = body_font.getmetrics()
+    line_h = int((asc + desc) * 1.14)
+    focus_y = ty + 220
+    max_line_w = 0
+    for line in focus_lines:
+        bb = draw.textbbox((0, 0), line, font=body_font)
+        max_line_w = max(max_line_w, bb[2] - bb[0])
+
+    hx0 = left + 170
+    hx1 = min(right - 175, hx0 + max_line_w + 26)
+    hy0 = focus_y - 5
+    hy1 = focus_y + line_h * len(focus_lines) - 6
+    draw.rectangle((hx0 - 10, hy0, hx1, hy1), fill=highlight)
+
+    fy = focus_y
+    for line in focus_lines:
+        draw.text((hx0, fy), line, font=body_font, fill=ink)
+        fy += line_h
+
+    if annotation:
+        note_x = right - 145
+        note_y = focus_y + 10
+        anchor_y = focus_y + min(20, (hy1 - hy0) // 2)
+        draw.line((hx1 + 18, anchor_y, note_x - 16, note_y + 14), fill=ink, width=4)
+        draw.polygon(((hx1 + 16, anchor_y),
+                      (hx1 + 30, anchor_y - 8),
+                      (hx1 + 30, anchor_y + 8)), fill=ink)
+        for i, text in enumerate(("KEY", "DETAIL")):
+            draw.text((note_x, note_y + i * 28), text, font=note_font, fill=ink)
+        draw.line((note_x, note_y + 64, note_x + 76, note_y + 64), fill=PINK, width=5)
+
+    secondary = [v for i, v in enumerate(normalized) if i != focus_idx][:3]
+    sy = ty + card_h - 122
+    sec_font = lf(BASK_REG, 21)
+    for line in secondary:
+        text = line if len(line) <= 58 else line[:55].rstrip() + "…"
+        draw.text((left + 16, sy), text, font=sec_font, fill=muted)
+        sy += 27
+
+    red_y = ty + card_h - 58
+    for width in (408, 492, 446):
+        draw.rectangle((left + 116, red_y, left + 116 + width, red_y + 9), fill=(175, 175, 175))
+        red_y += 17
 
     return ty + card_h
 

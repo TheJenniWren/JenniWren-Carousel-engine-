@@ -183,6 +183,7 @@ EDITORIAL_SCHEMAS: dict[str, dict[str, Any]] = {
             {"name": "excerpt", "label": "Document excerpt", "type": "textarea"},
             {"name": "highlight", "label": "Highlighted line numbers", "type": "text"},
             {"name": "annotation", "label": "Show annotation arrow", "type": "boolean"},
+            {"name": "body", "label": "Supporting body", "type": "textarea"},
             {"name": "citation", "label": "Citation", "type": "text"},
         ],
     },
@@ -324,6 +325,7 @@ RENDERER_FIELD_TO_EDITORIAL: dict[str, dict[str, str]] = {
         "headline_lines": "Headline",
         "headline_colors": "Headline",
         "image": "Document image filename",
+        "body": "Supporting body",
         "citation": "Citation",
         "label": "Label",
     },
@@ -775,6 +777,7 @@ def adapt_slide_to_renderer(slide: dict[str, Any]) -> dict[str, Any]:
             "doc_lines": _editor_lines(slide, "excerpt", "doc_lines"),
             "doc_highlight": _index_value(slide.get("highlight", slide.get("doc_highlight"))),
             "doc_annotation": bool(slide.get("annotation", slide.get("doc_annotation", True))),
+            "body": _body_value(slide.get("body")),
         })
         image = _editor_text(slide, "image")
         if image:
@@ -864,6 +867,7 @@ def renderer_slide_to_editor(slide: dict[str, Any]) -> dict[str, Any]:
             if isinstance(value, int)
         ]
         editor["annotation"] = bool(slide.get("doc_annotation", True))
+        editor["body"] = slide.get("body", [])
     elif template == "body_standard":
         editor["headline"] = _headline_editor_value(slide)
         editor["body"] = slide.get("body", [])
