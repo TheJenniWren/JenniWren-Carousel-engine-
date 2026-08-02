@@ -1,0 +1,17 @@
+{
+  "version": "3.9.0",
+  "cover_headline_registry_confirmation": "cover_headline",
+  "production_template_ids": [
+    "cover_headline",
+    "quote_lead",
+    "photo_headline",
+    "stat_callout",
+    "stat_grid",
+    "timeline",
+    "call_block",
+    "document_card",
+    "body_standard",
+    "sources_slide"
+  ],
+  "policy": "Aliases are rejected with a canonical expected ID; they are never silently converted."
+}

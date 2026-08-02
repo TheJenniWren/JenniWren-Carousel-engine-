@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-JenniWren Studio 3.8.0
+JenniWren Studio 3.9.0
 
 Structured browser editor for the ten templates currently supported by the
 JenniWren carousel renderer.
@@ -36,18 +36,36 @@ PORT = 8000
 PREVIEW_FOLDER = "_studio_live_preview"
 PREVIEW_STORY = "studio-live-preview"
 
-SUPPORTED_TEMPLATE_IDS = (
-    "cover_headline",
-    "quote_lead",
-    "photo_headline",
-    "stat_callout",
-    "stat_grid",
-    "timeline",
-    "call_block",
-    "document_card",
-    "body_standard",
-    "sources_slide",
-)
+# Studio 3.9 authoritative production template contract.
+#
+# Registry confirmation:
+#   Cover — Headline uses "cover_headline".
+#   "headline" is not a production ID and is rejected as an unsupported alias.
+TEMPLATE_ID_CONTRACT: dict[str, dict[str, Any]] = {
+    "cover_headline": {"label": "Cover — Headline", "required_editorial": ("headline",)},
+    "quote_lead": {"label": "Cover — Quote Lead", "required_editorial": ("quote", "attribution")},
+    "photo_headline": {"label": "Cover — Photo Story", "required_editorial": ("image", "headline")},
+    "stat_callout": {"label": "Data — Big Number", "required_editorial": ("statistic", "statistic_label")},
+    "stat_grid": {"label": "Data — Stat Grid", "required_editorial": ("statistics",)},
+    "timeline": {"label": "Explainer — Timeline", "required_editorial": ("headline", "events")},
+    "call_block": {"label": "Comparison — Call Block", "required_editorial": ("statement",)},
+    "document_card": {"label": "Evidence — Document Card", "required_editorial": ("headline", "excerpt")},
+    "body_standard": {"label": "Interior — Standard Explainer", "required_editorial": ("headline", "body")},
+    "sources_slide": {"label": "Final — Sources", "required_editorial": ("sources",)},
+}
+
+SUPPORTED_TEMPLATE_IDS = tuple(TEMPLATE_ID_CONTRACT)
+
+UNSUPPORTED_TEMPLATE_ALIASES: dict[str, str] = {
+    "headline": "cover_headline",
+    "cover_headline_story": "cover_headline",
+    "cover_photo_story": "photo_headline",
+    "photo_story": "photo_headline",
+    "big_number": "stat_callout",
+    "comparison": "call_block",
+    "standard_explainer": "body_standard",
+    "sources": "sources_slide",
+}
 
 
 TEMPLATE_MODULE_FILES = (
@@ -60,16 +78,8 @@ TEMPLATE_MODULE_FILES = (
 )
 
 TEMPLATE_LABEL_OVERRIDES = {
-    "cover_headline": "Cover — Headline",
-    "quote_lead": "Cover — Quote Lead",
-    "photo_headline": "Cover — Photo Story",
-    "stat_callout": "Data — Big Number",
-    "stat_grid": "Data — Stat Grid",
-    "timeline": "Explainer — Timeline",
-    "call_block": "Comparison — Call Block",
-    "document_card": "Evidence — Document Card",
-    "body_standard": "Interior — Standard Explainer",
-    "sources_slide": "Final — Sources",
+    template_id: definition["label"]
+    for template_id, definition in TEMPLATE_ID_CONTRACT.items()
 }
 
 FIELD_WIDGETS: dict[str, dict[str, str]] = {
@@ -673,9 +683,19 @@ def _editor_lines(slide: dict[str, Any], key: str, renderer_key: str = "") -> li
 
 def adapt_slide_to_renderer(slide: dict[str, Any]) -> dict[str, Any]:
     """Convert clean editorial fields into the exact production contract."""
-    template = str(slide.get("template") or "")
+    template = str(slide.get("template") or "").strip()
+    if template not in TEMPLATE_ID_CONTRACT:
+        expected = UNSUPPORTED_TEMPLATE_ALIASES.get(template)
+        if expected:
+            raise ValueError(
+                f'Unsupported template ID "{template}". Expected: "{expected}".'
+            )
+        raise ValueError(f'Unsupported template ID "{template}".')
     if template not in TEMPLATE_SCHEMA_REGISTRY:
-        return dict(slide)
+        raise ValueError(
+            f'Template ID "{template}" is valid but its renderer schema '
+            "was not discovered."
+        )
 
     label = str(
         slide.get("label")
@@ -835,7 +855,9 @@ def _headline_editor_value(slide: dict[str, Any], lines_key: str = "headline_lin
 
 def renderer_slide_to_editor(slide: dict[str, Any]) -> dict[str, Any]:
     """Convert an existing renderer-native slide into clean editorial fields."""
-    template = str(slide.get("template") or "body_standard")
+    template = str(slide.get("template") or "").strip()
+    if template not in TEMPLATE_ID_CONTRACT:
+        raise ValueError(f'Unsupported template ID "{template or "(missing)"}".')
     editor: dict[str, Any] = {
         "template": template,
         "label": str(
@@ -905,6 +927,226 @@ def renderer_payload_to_editor(payload: dict[str, Any]) -> dict[str, Any]:
             if isinstance(slide, dict)
         ],
     }
+
+
+
+def _strict_nonempty(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _strict_headline_errors(value: Any, *, slide_number: int, field_name: str) -> list[str]:
+    prefix = f"Slide {slide_number}: {field_name}"
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [] if value.strip() else [f"{prefix} must not be empty."]
+    if not isinstance(value, list):
+        return [
+            f'{prefix} must be a string or an array of '
+            '{"text": "...", "color": "white|pink"} objects.'
+        ]
+    if not value:
+        return [f"{prefix} must not be empty."]
+
+    errors: list[str] = []
+    for line_index, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            errors.append(
+                f'{prefix} line {line_index} must be an object with "text" '
+                'and optional "color".'
+            )
+            continue
+        unknown = sorted(set(item) - {"text", "color"})
+        if unknown:
+            errors.append(
+                f"{prefix} line {line_index} has unsupported key(s): "
+                + ", ".join(unknown)
+                + '. Expected only "text" and optional "color".'
+            )
+        if not str(item.get("text") or "").strip():
+            errors.append(f'{prefix} line {line_index} is missing "text".')
+        color = str(item.get("color") or "white").strip().lower()
+        if color not in {"white", "pink"}:
+            errors.append(
+                f'{prefix} line {line_index} has invalid color "{color}". '
+                'Expected "white" or "pink".'
+            )
+    return errors
+
+
+def strict_validate_editorial_payload(
+    payload: Any,
+    *,
+    asset_dir: Path | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        return ["The imported package must be one JSON object."]
+
+    if not str(payload.get("story") or payload.get("title") or "").strip():
+        errors.append("Story title is required.")
+    if not str(payload.get("source") or "").strip():
+        errors.append("Primary source is required.")
+
+    slides = payload.get("slides")
+    if not isinstance(slides, list) or not slides:
+        errors.append("At least one slide is required.")
+        return errors
+
+    fallback_fields = {
+        "headline": ("headline_lines",),
+        "quote": ("quote_lines",),
+        "image": (),
+        "statistic": ("stat_text",),
+        "statistic_label": ("stat_label",),
+        "statistics": ("stat_items",),
+        "events": ("timeline_entries",),
+        "statement": ("call_text",),
+        "excerpt": ("doc_lines",),
+        "body": (),
+        "sources": ("citations",),
+        "attribution": (),
+    }
+
+    for zero_index, slide in enumerate(slides):
+        slide_number = zero_index + 1
+        if not isinstance(slide, dict):
+            errors.append(f"Slide {slide_number}: slide data must be a JSON object.")
+            continue
+
+        template = str(slide.get("template") or "").strip()
+        if not template:
+            errors.append(f'Slide {slide_number}: missing required field "template".')
+            continue
+
+        if template not in TEMPLATE_ID_CONTRACT:
+            expected = UNSUPPORTED_TEMPLATE_ALIASES.get(template)
+            if expected:
+                errors.append(
+                    f'Slide {slide_number}: unsupported template ID "{template}". '
+                    f'Expected: "{expected}".'
+                )
+            else:
+                expected_ids = ", ".join(f'"{item}"' for item in SUPPORTED_TEMPLATE_IDS)
+                errors.append(
+                    f'Slide {slide_number}: unsupported template ID "{template}". '
+                    f"Expected one of: {expected_ids}."
+                )
+            continue
+
+        for field in TEMPLATE_ID_CONTRACT[template]["required_editorial"]:
+            value = slide.get(field)
+            if not _strict_nonempty(value):
+                for fallback in fallback_fields.get(field, ()):
+                    if _strict_nonempty(slide.get(fallback)):
+                        value = slide.get(fallback)
+                        break
+            if not _strict_nonempty(value):
+                errors.append(
+                    f'Slide {slide_number}: missing required field "{field}".'
+                )
+
+        headline_field = None
+        if template in {
+            "cover_headline", "photo_headline", "stat_grid",
+            "timeline", "body_standard", "document_card", "call_block",
+        }:
+            headline_field = "headline"
+        elif template == "stat_callout":
+            headline_field = "context"
+
+        if headline_field and headline_field in slide:
+            errors.extend(
+                _strict_headline_errors(
+                    slide.get(headline_field),
+                    slide_number=slide_number,
+                    field_name=headline_field,
+                )
+            )
+
+        if "headline_lines" in slide:
+            lines = slide.get("headline_lines")
+            if not isinstance(lines, list) or not lines or any(
+                not str(line or "").strip() for line in lines
+            ):
+                errors.append(
+                    f'Slide {slide_number}: "headline_lines" must be a '
+                    "non-empty array of non-empty strings."
+                )
+            colors = slide.get("headline_colors")
+            if colors is not None:
+                if not isinstance(colors, list) or len(colors) != len(lines or []):
+                    errors.append(
+                        f'Slide {slide_number}: "headline_colors" must contain '
+                        'one value for every "headline_lines" entry.'
+                    )
+                elif any(str(color).lower() not in {"white", "pink"} for color in colors):
+                    errors.append(
+                        f'Slide {slide_number}: "headline_colors" accepts only '
+                        '"white" or "pink".'
+                    )
+
+        if template == "timeline":
+            events = slide.get("events", slide.get("timeline_entries"))
+            if isinstance(events, list):
+                if not events:
+                    errors.append(f'Slide {slide_number}: "events" must not be empty.')
+                for event_index, event in enumerate(events, start=1):
+                    if not isinstance(event, dict):
+                        errors.append(
+                            f"Slide {slide_number}: Timeline event {event_index} "
+                            "must be a JSON object."
+                        )
+                        continue
+                    unknown = sorted(set(event) - {"date", "text"})
+                    if unknown:
+                        wrong = unknown[0]
+                        if wrong in {"body", "event", "description"}:
+                            errors.append(
+                                f'Slide {slide_number}: Timeline event {event_index} '
+                                f'uses unsupported key "{wrong}". Expected: "text".'
+                            )
+                        else:
+                            errors.append(
+                                f"Slide {slide_number}: Timeline event {event_index} "
+                                f"has unsupported key(s): {', '.join(unknown)}. "
+                                'Expected only "date" and "text".'
+                            )
+                    if not str(event.get("date") or "").strip():
+                        errors.append(
+                            f'Slide {slide_number}: Timeline event {event_index} '
+                            'is missing "date".'
+                        )
+                    if not str(event.get("text") or "").strip():
+                        errors.append(
+                            f'Slide {slide_number}: Timeline event {event_index} '
+                            'is missing "text".'
+                        )
+
+        if template == "photo_headline":
+            image_name = str(slide.get("image") or "").strip()
+            if image_name and asset_dir is not None:
+                try:
+                    candidate = safe_child(asset_dir, image_name)
+                except ValueError:
+                    errors.append(
+                        f'Slide {slide_number}: image file "{image_name}" '
+                        "uses an unsafe path."
+                    )
+                else:
+                    if not candidate.is_file():
+                        errors.append(
+                            f'Slide {slide_number}: image file "{image_name}" '
+                            "was not found."
+                        )
+
+    return errors
 
 
 def adapt_payload_to_renderer(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1427,6 +1669,13 @@ def prepare_carousel_payload(
     if not isinstance(slides, list) or not slides:
         raise ValueError("At least one slide is required.")
 
+    strict_errors = strict_validate_editorial_payload(
+        payload,
+        asset_dir=safe_child(STORIES_DIR, PREVIEW_FOLDER),
+    )
+    if strict_errors:
+        raise ValueError(strict_errors[0])
+
     production_payload = adapt_payload_to_renderer(payload)
     production_payload["story"] = (
         str(payload.get("story") or payload.get("title") or "").strip()
@@ -1737,7 +1986,7 @@ def build_page(*, folder_slug: str = "", data: dict[str, Any] | None = None,
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>JenniWren Studio 3.8.0</title>
+<title>JenniWren Studio 3.9.0</title>
 <style>
 :root{color-scheme:dark;--pink:#ff0a72;--bg:#080808;--panel:#151515;--panel2:#0d0d0d;--border:#363636;--text:#f7f7f7;--muted:#b8b8b8;--danger:#922048}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{width:min(1180px,calc(100% - 28px));margin:24px auto 64px}header{border-top:8px solid var(--pink);padding:24px 0 14px}h1{margin:0;font-size:clamp(38px,7vw,74px);line-height:.92;letter-spacing:-.035em;text-transform:uppercase}h2,h3{margin:0}p,.help{color:var(--muted)}.panel{margin-top:20px;padding:18px;background:var(--panel);border:1px solid var(--border);border-radius:14px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}label{display:block;margin:13px 0 7px;font-weight:800}input,textarea,select{width:100%;padding:12px;border:1px solid #484848;border-radius:10px;background:var(--panel2);color:var(--text);font:inherit}textarea{resize:vertical;line-height:1.42;min-height:105px}textarea.tall{min-height:150px}.actions,.toolbar,.small-actions{display:flex;flex-wrap:wrap;gap:9px}.actions{margin-top:18px}.toolbar{align-items:center;justify-content:space-between}button{border:0;border-radius:10px;padding:12px 18px;background:var(--pink);color:#fff;font:inherit;font-weight:850;cursor:pointer}button.secondary{background:#333}button.danger{background:var(--danger)}button.small{padding:7px 10px;font-size:13px}.slide{margin-top:16px;padding:16px;background:#101010;border:1px solid var(--border);border-radius:13px}.slide-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-bottom:10px;border-bottom:1px solid #2d2d2d}.repeater{margin-top:10px}.repeat-row{display:grid;grid-template-columns:170px 1fr auto;gap:8px;align-items:end;margin-top:8px}.repeat-row.stat{grid-template-columns:1fr 1fr auto}.repeat-row.source{grid-template-columns:1fr auto}.repeat-row.headline{grid-template-columns:minmax(0,1fr) 120px auto}.headline-color.white{border-color:#777}.headline-color.pink{border-color:var(--pink)}.notice{margin-top:18px;padding:14px 16px;border-left:5px solid var(--pink);background:#1b1b1b;white-space:pre-wrap}.import-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.import-status{margin-top:10px;padding:10px 12px;border-radius:9px;background:#202020;color:var(--muted);white-space:pre-wrap}.import-status.error{border-left:4px solid #ff567f;color:#fff}.import-status.success{border-left:4px solid #55d98b;color:#fff}pre{overflow-x:auto;white-space:pre-wrap;padding:14px;border:1px solid var(--border);border-radius:10px;background:#050505}.hidden{display:none}.previews{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px}.preview-card{overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--panel2)}.preview-card img{display:block;width:100%;height:auto}.preview-card div{padding:10px 12px;color:var(--muted);font-size:14px}.editor-preview-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;align-items:start}.preview-pane{position:sticky;top:14px}.live-frame{margin-top:12px;background:#090909;border:1px solid var(--border);border-radius:12px;overflow:hidden;min-height:280px;display:flex;align-items:center;justify-content:center}.live-frame img{display:block;width:100%;height:auto}.live-empty{padding:28px;color:var(--muted);text-align:center}.preview-strip{display:flex;gap:8px;overflow-x:auto;margin-top:10px;padding-bottom:4px}.preview-thumb{flex:0 0 74px;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#111;padding:0}.preview-thumb.active{border-color:var(--pink)}.preview-thumb img{display:block;width:100%;height:auto}.preview-status{margin-top:10px;color:var(--muted)}.status-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#777;margin-right:7px}.status-dot.busy{background:#ffbf47}.status-dot.good{background:#55d98b}.status-dot.bad{background:#ff567f}.slide.active{outline:2px solid var(--pink);outline-offset:2px}.dirty-badge{display:none;color:#ffbf47;font-size:12px;font-weight:800;margin-left:8px}.slide.dirty .dirty-badge{display:inline}.validation-box{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:#101010}.validation-box.good{border-left:4px solid #55d98b}.validation-box.bad{border-left:4px solid #ff567f}.validation-title{font-weight:850;margin-bottom:6px}.validation-list{margin:0;padding-left:18px;color:var(--muted)}.preview-nav{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;margin-top:12px}.preview-nav .counter{text-align:center;font-weight:800}.save-state{margin-left:auto;color:var(--muted);font-size:13px}.import-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.import-tab.active{background:var(--pink)}.reporting-help{font-size:13px;color:var(--muted);margin-top:6px}.field-error{border-color:#ff567f!important;box-shadow:0 0 0 1px #ff567f}.slide.collapsed .slide-body{display:none}.slide-summary{display:none;color:var(--muted);font-size:13px;margin-top:8px;line-height:1.4}.slide.collapsed .slide-summary{display:block}.slide.collapsed{padding:12px 14px}.slide.collapsed .slide-head{border-bottom:0;padding-bottom:0}.drag-handle{cursor:grab;user-select:none;padding:7px 10px;background:#252525;border-radius:8px;font-weight:900}.slide.dragging{opacity:.5}.slide.drop-target{outline:2px dashed var(--pink);outline-offset:3px}.ai-builder-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.ai-choice{display:flex;gap:8px;align-items:center;margin-top:8px}.ai-plan{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:#101010}.thumb-drag{cursor:grab}.app-error{margin:18px 0;padding:16px;border:1px solid #ff567f;border-left:6px solid #ff567f;border-radius:12px;background:#231016}.app-error h2{margin:0 0 8px}.app-error pre{margin:10px 0 0}.template-error{padding:12px;border:1px solid #ff567f;border-radius:10px;background:#211015;color:#fff}summary{cursor:pointer;font-weight:800}@media(max-width:900px){.editor-preview-grid{grid-template-columns:1fr}.preview-pane{position:static}}@media(max-width:720px){.two,.import-grid,.ai-builder-grid{grid-template-columns:1fr;gap:0}.slide-head{align-items:flex-start;flex-direction:column}.repeat-row,.repeat-row.stat{grid-template-columns:1fr}}
@@ -1745,7 +1994,7 @@ def build_page(*, folder_slug: str = "", data: dict[str, Any] | None = None,
 </head>
 <body>
 <main>
-<header><h1>JenniWren Studio 3.8.0</h1><p>Template Engine • Safari and Codespaces port compatibility stabilized.</p></header>
+<header><h1>JenniWren Studio 3.9.0</h1><p>Template Engine • Safari and Codespaces port compatibility stabilized.</p></header>
 <section id="app-error" class="app-error hidden" role="alert">
   <h2>Studio error</h2>
   <div id="app-error-message"></div>
@@ -3301,28 +3550,38 @@ document.getElementById("load-story").addEventListener("click",()=>{
   if(!folder){showImportStatus("Enter the story folder name first.","error");return}
   window.location.href=`/?folder=${encodeURIComponent(folder)}`;
 });
-document.getElementById("import-json-button").addEventListener("click",()=>{
+document.getElementById("import-json-button").addEventListener("click",async()=>{
   const raw=document.getElementById("import-json").value.trim();
   if(!raw){showImportStatus("Paste a carousel JSON package first.","error");return}
   try{
     const data=JSON.parse(raw);
-    const report=validateData(data);
-    const errors=flatErrors(report);
-    if(errors.length){showImportStatus(errors.join("\n"),"error");return}
+    const response=await fetch("/validate",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({payload:data,slide_index:0})
+    });
+    const result=await response.json();
+    if(!response.ok||!result.ok){
+      throw new Error(result.error||"Validation failed.");
+    }
     populateFromData(data);
+    rendererState=result.report.production_payload;
+    latestValidationReport=normalizeValidationReport(result.report,0);
     const storyObj=(data.story&&typeof data.story==="object") ? data.story : {};
-const suggested=(
-  data.folder_slug ||
-  data.slug ||
-  storyObj.folder_slug ||
-  storyObj.title ||
-  (typeof data.story==="string" ? data.story : "") ||
-  "story"
-).toString().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+    const suggested=(
+      data.folder_slug ||
+      data.slug ||
+      storyObj.folder_slug ||
+      storyObj.title ||
+      (typeof data.story==="string" ? data.story : "") ||
+      "story"
+    ).toString().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
     if(suggested)document.getElementById("folder_slug").value=suggested;
     showImportStatus(`Imported ${data.slides.length} slides. Review or edit, then Render Full Carousel.`,"success");
     selectSlide(0,{render:false});
-  }catch(error){showImportStatus(`Invalid JSON: ${error.message}`,"error")}
+  }catch(error){
+    showImportStatus(`Import rejected: ${error.message}`,"error");
+  }
 });
 document.getElementById("add-slide").addEventListener("click",()=>{
   addSlide({template:"body_standard",label:"NEW SLIDE",headline:"",body:"",citation:""});
@@ -3540,6 +3799,12 @@ class StudioHandler(BaseHTTPRequestHandler):
                 selected_index = int(envelope.get("slide_index", 0)) if isinstance(envelope, dict) else 0
                 if not isinstance(payload, dict):
                     raise ValueError("Editor state is missing.")
+                strict_errors = strict_validate_editorial_payload(
+                    payload,
+                    asset_dir=safe_child(STORIES_DIR, PREVIEW_FOLDER),
+                )
+                if strict_errors:
+                    raise ValueError("\n".join(strict_errors))
                 report = renderer_validation_report(payload, selected_index)
             except (json.JSONDecodeError, ValueError, TypeError) as exc:
                 self.send_json(
@@ -3686,6 +3951,21 @@ class StudioHandler(BaseHTTPRequestHandler):
             )
             return
 
+        strict_errors = strict_validate_editorial_payload(
+            payload,
+            asset_dir=safe_child(STORIES_DIR, PREVIEW_FOLDER),
+        )
+        if strict_errors:
+            self.send_html(
+                build_page(
+                    folder_slug=folder_slug,
+                    data=payload if isinstance(payload, dict) else default_story(),
+                    message="Validation failed:\n" + "\n".join(strict_errors),
+                ),
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+
         # Single authoritative adapter used by save and export.
         payload = adapt_payload_to_renderer(payload)
         errors = validate_payload(payload)
@@ -3715,7 +3995,7 @@ def main() -> int:
     if not RENDERER.exists():
         print(f"ERROR: Missing {RENDERER.name} beside carousel_dashboard.py."); return 1
     server = ThreadingHTTPServer((HOST, PORT), StudioHandler)
-    print(f"JenniWren Studio 3.8.0 running on port {PORT}")
+    print(f"JenniWren Studio 3.9.0 running on port {PORT}")
     print("Open port 8000 from the Codespaces PORTS tab.")
     try:
         server.serve_forever()
