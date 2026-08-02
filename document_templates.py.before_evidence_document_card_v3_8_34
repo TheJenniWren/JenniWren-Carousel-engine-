@@ -1,0 +1,61 @@
+"""
+document_templates.py
+JenniWren Carousel Production Pipeline -- COMP family (evidence)
+"""
+
+from __future__ import annotations
+
+from typing import List
+
+from renderer_imports import carousel_lib as cl
+from production_config import TemplateDefaults
+from story_loader import StorySlide, StoryPackage
+from template_shared import colors_from_names, require_fields
+
+
+def render_document_card(slide: StorySlide, n: int, total: int, story: StoryPackage,
+                         defaults: TemplateDefaults):
+    """Evidence — Document Card v3.8.33."""
+    require_fields(slide, "label", "doc_lines", "headline_lines", "headline_colors")
+    qa_notes: List[str] = []
+
+    img, draw = cl.new_canvas()
+    cl.draw_top_bar(draw, slide.get("label"), n, total,
+                    big=bool(slide.get("big_label", False)))
+
+    card_top = 112
+    requested_h = int(slide.get("doc_card_h", 500) or 500)
+    highlight_idxs = set(slide.get("doc_highlight", []) or [])
+
+    card_bottom = cl.draw_document_card(
+        draw,
+        img,
+        slide.get("doc_lines") or [],
+        highlight_idxs,
+        card_top,
+        card_h=requested_h,
+        annotation=bool(slide.get("doc_annotation", True)),
+    )
+
+    headline_lines = list(slide.get("headline_lines") or [])
+    colors = colors_from_names(slide.get("headline_colors"), slide.slide_id)
+
+    headline_top = card_bottom + 28
+    sr = tuple(slide.get("headline_range", (82, 150)))
+    headline_bottom = cl.draw_headline(draw, headline_lines, colors, headline_top, sr)
+    cl.draw_divider(draw, headline_bottom + 4)
+
+    if headline_bottom > cl.FOOTER_SAFE - 70:
+        qa_notes.append(
+            f"document-card conclusion extends to y={headline_bottom}; "
+            "shorten the excerpt or headline."
+        )
+
+    cl.draw_footer(
+        draw,
+        brand_name=story.brand_footer,
+        arrow=bool(slide.get("arrow", True)),
+    )
+    return img, qa_notes
+
+

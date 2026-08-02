@@ -1,0 +1,91 @@
+{
+  "story": "$292 Million for Troop Housing",
+  "title": "$292 Million for Troop Housing",
+  "folder_slug": "292-million-for-troop-housing",
+  "source": "JenniWren Studio internal Photo Story template test",
+  "slides": [
+    {
+      "template": "photo_headline",
+      "label": "THE PRICE TAG",
+      "headline_range": [
+        72,
+        180
+      ],
+      "photo_style": "fade",
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio internal Photo Story template test",
+      "image": "photo-story-test.png",
+      "headline_lines": [
+        "THE BILL",
+        "COMES DUE"
+      ],
+      "headline_colors": [
+        "white",
+        "pink"
+      ]
+    },
+    {
+      "template": "body_standard",
+      "label": "WHAT HAPPENED",
+      "headline_range": [
+        72,
+        180
+      ],
+      "body_size": 62,
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio internal Photo Story template test",
+      "headline_lines": [
+        "THE CONTRACT",
+        "LOCKS IN YEARS OF COSTS"
+      ],
+      "headline_colors": [
+        "white",
+        "pink"
+      ],
+      "body": [
+        {
+          "text": "The agreement would provide apartment-style housing for National Guard troops in Washington. The central question is not whether the lodging is nicer than hotel rooms. It is why taxpayers are being asked to underwrite such a large and extended deployment in the first place."
+        }
+      ]
+    },
+    {
+      "template": "timeline",
+      "label": "THE TIMELINE",
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio internal Photo Story template test",
+      "headline_lines": [
+        "HOW IT",
+        "ADDS UP"
+      ],
+      "headline_colors": [
+        "white",
+        "pink"
+      ],
+      "timeline_entries": [
+        {
+          "date": "AUG. 2026",
+          "text": "Officials announced the new three-year housing arrangement for troops stationed in Washington."
+        },
+        {
+          "date": "THROUGH 2028",
+          "text": "The contract keeps the lodging commitment in place as the mission continues with no clear off-ramp."
+        },
+        {
+          "date": "JAN. 2029",
+          "text": "Under the current framework, the deployment could continue into the next inauguration cycle."
+        }
+      ]
+    },
+    {
+      "template": "sources_slide",
+      "label": "SOURCES",
+      "arrow": false,
+      "citations": [
+        "JenniWren Studio internal Photo Story template test"
+      ]
+    }
+  ]
+}

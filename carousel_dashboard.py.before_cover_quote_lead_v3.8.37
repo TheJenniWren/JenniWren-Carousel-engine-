@@ -124,7 +124,7 @@ EDITORIAL_SCHEMAS: dict[str, dict[str, Any]] = {
         "fields": [
             {"name": "quote", "label": "Quote", "type": "textarea"},
             {"name": "attribution", "label": "Attribution", "type": "text"},
-            {"name": "attribution_detail", "label": "Role / source / date", "type": "textarea"},
+            {"name": "attribution_detail", "label": "Role / source / date", "type": "text"},
             {"name": "context_headline", "label": "Context headline", "type": "headline"},
             {"name": "context_body", "label": "Context body", "type": "textarea"},
             {"name": "citation", "label": "Citation", "type": "text"},

@@ -124,9 +124,6 @@ EDITORIAL_SCHEMAS: dict[str, dict[str, Any]] = {
         "fields": [
             {"name": "quote", "label": "Quote", "type": "textarea"},
             {"name": "attribution", "label": "Attribution", "type": "text"},
-            {"name": "attribution_detail", "label": "Role / source / date", "type": "textarea"},
-            {"name": "context_headline", "label": "Context headline", "type": "headline"},
-            {"name": "context_body", "label": "Context body", "type": "textarea"},
             {"name": "citation", "label": "Citation", "type": "text"},
         ],
     },
@@ -283,10 +280,6 @@ RENDERER_FIELD_TO_EDITORIAL: dict[str, dict[str, str]] = {
         "quote_lines": "Quote",
         "quote_colors": "Quote",
         "attribution": "Attribution",
-        "attribution_detail": "Role / source / date",
-        "context_headline_lines": "Context headline",
-        "context_headline_colors": "Context headline",
-        "context_body": "Context body",
         "citation": "Citation",
         "label": "Label",
     },
@@ -704,15 +697,10 @@ def adapt_slide_to_renderer(slide: dict[str, Any]) -> dict[str, Any]:
 
     elif template == "quote_lead":
         lines = _editor_lines(slide, "quote", "quote_lines")
-        context_lines, context_colors = _editor_headline(slide, "context_headline", "context_headline_lines")
         adapted.update({
             "quote_lines": lines,
             "quote_colors": ["white"] * len(lines),
             "attribution": _editor_text(slide, "attribution"),
-            "attribution_detail": _editor_text(slide, "attribution_detail"),
-            "context_headline_lines": context_lines,
-            "context_headline_colors": context_colors,
-            "context_body": _body_value(slide.get("context_body")),
         })
 
     elif template == "photo_headline":
@@ -853,12 +841,6 @@ def renderer_slide_to_editor(slide: dict[str, Any]) -> dict[str, Any]:
     elif template == "quote_lead":
         editor["quote"] = _line_value(slide.get("quote_lines"))
         editor["attribution"] = slide.get("attribution", "")
-        editor["attribution_detail"] = slide.get("attribution_detail", "")
-        editor["context_headline"] = _headline_editor_value({
-            "headline_lines": slide.get("context_headline_lines", []),
-            "headline_colors": slide.get("context_headline_colors", []),
-        })
-        editor["context_body"] = slide.get("context_body", [])
     elif template == "photo_headline":
         editor["image"] = slide.get("image", "")
         editor["headline"] = _headline_editor_value(slide)

@@ -1,12 +1,11 @@
 {
-  "story": "The Price Tag",
-  "title": "The Price Tag",
-  "folder_slug": "the-price-tag",
-  "source": "JenniWren Studio internal template test",
+  "folder": "_studio_template_engine_test",
+  "story": "JenniWren Template Engine Test",
+  "source": "JenniWren Studio internal certification",
   "slides": [
     {
       "template": "cover_headline",
-      "label": "THE PRICE TAG",
+      "label": "THE JENNI WREN",
       "headline_range": [
         72,
         180
@@ -14,41 +13,183 @@
       "body_size": 62,
       "big_label": false,
       "arrow": true,
-      "citation": "JenniWren Studio internal template test",
+      "citation": "JenniWren Studio",
       "headline_lines": [
-        "THE BILL",
-        "COMES DUE"
+        "TEN TEMPLATES",
+        "ONE ENGINE"
       ],
       "headline_colors": [
         "white",
-        "pink"
+        "white"
       ],
       "body": [
         {
-          "text": "A template test for large-number storytelling."
+          "text": "Every supported layout now follows one production pipeline."
         }
       ]
     },
     {
-      "template": "stat_callout",
-      "label": "THE NUMBER",
+      "template": "quote_lead",
+      "label": "QUOTE",
+      "headline_range": [
+        72,
+        180
+      ],
       "big_label": false,
       "arrow": true,
-      "citation": "JenniWren Studio internal template test",
-      "stat_text": "$292M",
-      "stat_label": "THREE-YEAR HOUSING CONTRACT",
+      "citation": "Internal certification",
+      "quote_lines": [
+        "The template engine is working."
+      ],
+      "quote_colors": [
+        "white"
+      ],
+      "attribution": "JenniWren Studio",
+      "attribution_detail": "",
+      "context_headline_lines": [],
+      "context_headline_colors": [],
+      "context_body": []
+    },
+    {
+      "template": "photo_headline",
+      "label": "PHOTO STORY",
+      "headline_range": [
+        72,
+        180
+      ],
+      "photo_style": "fade",
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio",
+      "image": "template-engine-test.png",
       "headline_lines": [
-        "FOR NATIONAL GUARD TROOPS",
-        "IN WASHINGTON, D.C."
+        "PHOTO TEMPLATE"
       ],
       "headline_colors": [
-        "white",
-        "pink"
+        "white"
       ]
     },
     {
+      "template": "stat_callout",
+      "label": "BY THE NUMBERS",
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio",
+      "stat_text": "10",
+      "stat_label": "SUPPORTED TEMPLATES",
+      "headline_lines": [
+        "ONE PRODUCTION ENGINE"
+      ],
+      "headline_colors": [
+        "white"
+      ]
+    },
+    {
+      "template": "stat_grid",
+      "label": "KEY NUMBERS",
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio",
+      "headline_lines": [
+        "ENGINE STATUS"
+      ],
+      "headline_colors": [
+        "white"
+      ],
+      "stat_items": [
+        [
+          "10",
+          "Templates"
+        ],
+        [
+          "1",
+          "Registry"
+        ],
+        [
+          "1",
+          "Adapter"
+        ],
+        [
+          "1",
+          "Renderer"
+        ]
+      ]
+    },
+    {
+      "template": "timeline",
+      "label": "TIMELINE",
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio",
+      "headline_lines": [
+        "HOW A SLIDE RENDERS"
+      ],
+      "headline_colors": [
+        "white"
+      ],
+      "timeline_entries": [
+        {
+          "date": "1",
+          "text": "Edit the visible fields"
+        },
+        {
+          "date": "2",
+          "text": "Adapter builds renderer JSON"
+        },
+        {
+          "date": "3",
+          "text": "Production renderer writes PNG"
+        }
+      ]
+    },
+    {
+      "template": "call_block",
+      "label": "THE POINT",
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio",
+      "headline_lines": [
+        "ONE PIPELINE"
+      ],
+      "headline_colors": [
+        "white"
+      ],
+      "call_text": "THE EDITOR AND RENDERER NOW SPEAK THE SAME LANGUAGE.",
+      "body": [
+        {
+          "text": "Every template travels through the same adapter and production engine."
+        }
+      ]
+    },
+    {
+      "template": "document_card",
+      "label": "DOCUMENT EVIDENCE",
+      "doc_annotation": true,
+      "big_label": false,
+      "arrow": true,
+      "citation": "JenniWren Studio",
+      "headline_lines": [
+        "THE CONTRACT"
+      ],
+      "headline_colors": [
+        "white"
+      ],
+      "doc_lines": [
+        "EDITOR STATE",
+        "ADAPTER",
+        "RENDERER JSON",
+        "PRODUCTION PNG"
+      ],
+      "doc_highlight": [
+        1,
+        2
+      ],
+      "body": [],
+      "image": "template-engine-test.png"
+    },
+    {
       "template": "body_standard",
-      "label": "WHAT IT MEANS",
+      "label": "WHAT HAPPENED",
       "headline_range": [
         72,
         180
@@ -56,18 +197,16 @@
       "body_size": 62,
       "big_label": false,
       "arrow": true,
-      "citation": "JenniWren Studio internal template test",
+      "citation": "JenniWren Studio",
       "headline_lines": [
-        "THE COST",
-        "IS THE STORY"
+        "THE ENGINE PASSED"
       ],
       "headline_colors": [
-        "white",
-        "pink"
+        "white"
       ],
       "body": [
         {
-          "text": "Large numbers need context. The slide should make the amount feel immediate, legible, and politically meaningful."
+          "text": "All ten production templates are registered, editable, adaptable, and renderable."
         }
       ]
     },
@@ -76,7 +215,9 @@
       "label": "SOURCES",
       "arrow": false,
       "citations": [
-        "JenniWren Studio internal template test"
+        "JenniWren Studio Template Registry",
+        "JenniWren Production Renderer",
+        "Internal Template Certification"
       ]
     }
   ]

@@ -126,19 +126,17 @@ def render_cover_headline(slide: StorySlide, n: int, total: int, story: StoryPac
 
 def render_quote_lead(slide: StorySlide, n: int, total: int, story: StoryPackage,
                       defaults: TemplateDefaults):
-    """Cover — Quote Lead v3.8.38.
+    """Cover — Quote Lead v3.8.36.
 
-    Clean replacement modeled on the black Quote Lead reference.
+    Dedicated quote-cover hierarchy:
+      1. oversized opening quotation mark
+      2. fitted Libre Baskerville quote
+      3. closing quotation mark
+      4. attribution + optional role/source/date
+      5. divider
+      6. contextual headline + short explanatory deck
 
-    Hierarchy:
-      1. Oversized Barlow Condensed quote block
-      2. Pink attribution name
-      3. White role / source / date detail
-      4. Divider near y≈850
-      5. Context headline
-      6. Context body using the lower slide area
-
-    Supported inline emphasis tokens:
+    Inline pink emphasis is supported with either:
       <pink>important words</pink>
       [[pink:important words]]
     """
@@ -154,29 +152,27 @@ def render_quote_lead(slide: StorySlide, n: int, total: int, story: StoryPackage
         big=bool(slide.get("big_label", False)),
     )
 
-    def _segments(value, default_fill=cl.WHITE, uppercase=False):
-        out = []
+    def normalize_segments(value, default_fill=cl.WHITE):
+        segments = []
 
         def add(text, fill):
             text = str(text or "")
-            if uppercase:
-                text = text.upper()
             if text.strip():
-                out.append((text.strip(), fill))
+                segments.append((text.strip(), fill))
 
         def parse_inline(text, base_fill):
             text = str(text or "")
-            pattern = re.compile(r'(<pink>.*?</pink>|\[\[pink:.*?\]\])', re.IGNORECASE | re.DOTALL)
+            pattern = re.compile(r"(<pink>.*?</pink>|\[\[pink:.*?\]\])", re.IGNORECASE | re.DOTALL)
             pos = 0
-            for m in pattern.finditer(text):
-                if m.start() > pos:
-                    add(text[pos:m.start()], base_fill)
-                token = m.group(0)
-                if token.lower().startswith('<pink>'):
+            for match in pattern.finditer(text):
+                if match.start() > pos:
+                    add(text[pos:match.start()], base_fill)
+                token = match.group(0)
+                if token.lower().startswith("<pink>"):
                     add(token[6:-7], cl.PINK)
                 else:
                     add(token[7:-2], cl.PINK)
-                pos = m.end()
+                pos = match.end()
             if pos < len(text):
                 add(text[pos:], base_fill)
 
@@ -187,11 +183,12 @@ def render_quote_lead(slide: StorySlide, n: int, total: int, story: StoryPackage
                 parse_inline(node, inherited_fill)
                 return
             if isinstance(node, dict):
-                fill = cl.PINK if str(node.get('color') or '').lower() == 'pink' else inherited_fill
-                if 'text' in node:
-                    parse_inline(node.get('text'), fill)
+                color = str(node.get("color") or "white").lower()
+                fill = cl.PINK if color == "pink" else inherited_fill
+                if "text" in node:
+                    parse_inline(node.get("text"), fill)
                     return
-                for key in ('segments', 'content', 'children', 'body'):
+                for key in ("segments", "content", "children", "body"):
                     if key in node:
                         walk(node.get(key), fill)
                         return
@@ -203,250 +200,174 @@ def render_quote_lead(slide: StorySlide, n: int, total: int, story: StoryPackage
             parse_inline(str(node), inherited_fill)
 
         walk(value)
-        return out
+        return segments
 
-    def _plain_text(value):
-        if value is None:
-            return ""
-        if isinstance(value, str):
-            return value
-        if isinstance(value, dict):
-            if 'text' in value:
-                return str(value.get('text') or '')
-            for key in ('segments', 'content', 'children', 'body'):
-                if key in value:
-                    return _plain_text(value.get(key))
-            return ""
-        if isinstance(value, (list, tuple)):
-            return ' '.join(_plain_text(v) for v in value if _plain_text(v).strip())
-        return str(value)
-
-    def _wrap_rich(segments, font, max_w):
+    def wrap_rich(segments, font, max_w):
         words = []
         for text, fill in segments:
             for word in str(text).split():
                 words.append((word, fill))
-        if not words:
-            return []
         lines = []
         current = []
-        cur_w = 0.0
-        sp = cl.mw(draw, ' ', font)
+        current_w = 0.0
+        space_w = cl.mw(draw, " ", font)
         for word, fill in words:
-            ww = cl.mw(draw, word, font)
-            need = ww if not current else sp + ww
-            if current and cur_w + need > max_w:
+            word_w = cl.mw(draw, word, font)
+            needed = word_w if not current else space_w + word_w
+            if current and current_w + needed > max_w:
                 lines.append(current)
                 current = [(word, fill)]
-                cur_w = ww
+                current_w = word_w
             else:
                 if current:
-                    cur_w += sp
+                    current_w += space_w
                 current.append((word, fill))
-                cur_w += ww
+                current_w += word_w
         if current:
             lines.append(current)
         return lines
 
-    def _line_width(line, font):
-        if not line:
-            return 0
-        sp = cl.mw(draw, ' ', font)
-        total_w = 0
-        for i, (word, _fill) in enumerate(line):
-            total_w += cl.mw(draw, word, font)
-            if i < len(line) - 1:
-                total_w += sp
-        return total_w
-
-    def _draw_rich_lines(lines, font, x, y, line_h):
-        sp = cl.mw(draw, ' ', font)
+    def draw_rich_lines(lines, font, x, y, line_h):
+        space_w = cl.mw(draw, " ", font)
         for line in lines:
             cx = x
-            for i, (word, fill) in enumerate(line):
+            for idx, (word, fill) in enumerate(line):
                 draw.text((cx, y), word, font=font, fill=fill)
                 cx += cl.mw(draw, word, font)
-                if i < len(line) - 1:
-                    cx += sp
+                if idx < len(line) - 1:
+                    cx += space_w
             y += line_h
         return y
 
-    def _wrap_plain_lines(text, font, max_w):
-        text = str(text or '').strip()
-        if not text:
-            return []
-        lines = []
-        current = ''
-        for word in text.split():
-            trial = f'{current} {word}'.strip()
-            bb = draw.textbbox((0, 0), trial, font=font)
-            if current and bb[2] - bb[0] > max_w:
-                lines.append(current)
-                current = word
-            else:
-                current = trial
-        if current:
-            lines.append(current)
-        return lines
+    # --- Quote block -----------------------------------------------------
+    quote_source = slide.get("quote_lines") or []
+    quote_segments = normalize_segments(" ".join(str(v) for v in quote_source), cl.WHITE)
+    if not quote_segments:
+        quote_segments = [("Quote", cl.WHITE)]
 
-    # ---- Quote block -------------------------------------------------
-    quote_source = slide.get('quote_lines') or []
-    if not isinstance(quote_source, (list, tuple)):
-        quote_source = [quote_source]
+    quote_x = cl.L_MARGIN + 122
+    quote_y = 170
+    quote_w = cl.W - quote_x - cl.R_MARGIN - 36
+    quote_limit = 710
 
-    explicit_lines = []
-    for item in quote_source:
-        segs = _segments(item, cl.WHITE, uppercase=True)
-        if segs:
-            explicit_lines.append(segs)
-    if not explicit_lines:
-        explicit_lines = [[('QUOTE', cl.WHITE)]]
-
-    quote_x = int(slide.get('quote_x', 128))
-    quote_y = int(slide.get('quote_y', 190))
-    quote_w = int(slide.get('quote_w', 884))
-    quote_max_bottom = int(slide.get('quote_max_bottom', 670))
-
-    open_font = cl.lf(cl.BASK_REG, 180)
-    close_font = cl.lf(cl.BASK_REG, 165)
-    open_x = int(slide.get('open_quote_x', 42))
-    open_y = int(slide.get('open_quote_y', 150))
-    draw.text((open_x, open_y), '“', font=open_font, fill=cl.PINK)
+    opening_font = cl.lf(cl.BASK_REG, 170)
+    draw.text((cl.L_MARGIN - 6, 112), "“", font=opening_font, fill=cl.PINK)
 
     quote_font = None
     quote_lines = None
     quote_lh = None
+    for size in range(76, 43, -2):
+        font = cl.lf(cl.BASK_REG, size)
+        asc, desc = font.getmetrics()
+        lh = int((asc + desc) * 1.02)
+        lines = wrap_rich(quote_segments, font, quote_w)
+        if len(lines) <= 6 and quote_y + len(lines) * lh <= quote_limit:
+            quote_font, quote_lines, quote_lh = font, lines, lh
+            break
 
-    # Preserve deliberate editorial stacking when 2+ explicit lines were supplied.
-    if len(explicit_lines) > 1:
-        for size in range(118, 70, -2):
-            font = cl.lf(cl.BARLOW, size)
-            asc, desc = font.getmetrics()
-            lh = int((asc + desc) * 0.82)
-            widths_ok = all(_line_width(line, font) <= quote_w for line in explicit_lines)
-            bottom_ok = quote_y + len(explicit_lines) * lh <= quote_max_bottom
-            if widths_ok and bottom_ok:
-                quote_font, quote_lines, quote_lh = font, explicit_lines, lh
-                break
-        if quote_font is None:
-            quote_font = cl.lf(cl.BARLOW, 70)
-            asc, desc = quote_font.getmetrics()
-            quote_lh = int((asc + desc) * 0.82)
-            quote_lines = explicit_lines
+    if quote_font is None:
+        quote_font = cl.lf(cl.BASK_REG, 44)
+        asc, desc = quote_font.getmetrics()
+        quote_lh = int((asc + desc) * 1.00)
+        quote_lines = wrap_rich(quote_segments, quote_font, quote_w)
+
+    quote_bottom = draw_rich_lines(quote_lines, quote_font, quote_x, quote_y, quote_lh)
+
+    closing_font = cl.lf(cl.BASK_REG, 145)
+    closing_x = cl.W - cl.R_MARGIN - 120
+    closing_y = min(quote_bottom - 74, quote_limit - 84)
+    draw.text((closing_x, closing_y), "”", font=closing_font, fill=cl.PINK)
+
+    # --- Attribution -----------------------------------------------------
+    attr_y = quote_bottom + 18
+    attribution = str(slide.get("attribution") or "").strip().upper()
+    attr_font = cl.lf(cl.BARLOW, 34)
+    draw.text((quote_x, attr_y), f"– {attribution}", font=attr_font, fill=cl.PINK)
+
+    detail = str(slide.get("attribution_detail") or "").strip()
+    if detail:
+        detail_font = cl.lf(cl.BARLOW, 22)
+        detail_w = cl.W - quote_x - cl.R_MARGIN
+        detail_lines = []
+        current = ""
+        for word in detail.split():
+            trial = f"{current} {word}".strip()
+            bb = draw.textbbox((0, 0), trial, font=detail_font)
+            if current and bb[2] - bb[0] > detail_w:
+                detail_lines.append(current)
+                current = word
+            else:
+                current = trial
+        if current:
+            detail_lines.append(current)
+        dy = attr_y + 43
+        for line in detail_lines[:2]:
+            draw.text((quote_x, dy), line, font=detail_font, fill=cl.WHITE)
+            dy += 28
+        attr_bottom = dy
     else:
-        merged = explicit_lines[0]
-        # Fit to a large stacked quote occupying roughly the upper 60–65%.
-        for size in range(130, 72, -2):
-            font = cl.lf(cl.BARLOW, size)
-            asc, desc = font.getmetrics()
-            lh = int((asc + desc) * 0.82)
-            lines = _wrap_rich(merged, font, quote_w)
-            bottom = quote_y + len(lines) * lh
-            if 3 <= len(lines) <= 5 and bottom <= quote_max_bottom:
-                quote_font, quote_lines, quote_lh = font, lines, lh
-                break
-        if quote_font is None:
-            quote_font = cl.lf(cl.BARLOW, 78)
-            asc, desc = quote_font.getmetrics()
-            quote_lh = int((asc + desc) * 0.82)
-            quote_lines = _wrap_rich(merged, quote_font, quote_w)
+        attr_bottom = attr_y + 44
 
-    quote_bottom = _draw_rich_lines(quote_lines, quote_font, quote_x, quote_y, quote_lh)
-    last_w = _line_width(quote_lines[-1], quote_font) if quote_lines else 0
-    close_x_try = quote_x + last_w + 12
-    if close_x_try <= cl.W - cl.R_MARGIN - 40:
-        close_x = close_x_try
-        close_y = quote_bottom - int(close_font.size * 0.80)
-    else:
-        close_x = min(cl.W - cl.R_MARGIN - 80, quote_x + max(0, last_w - 40))
-        close_y = quote_bottom - 8
-    draw.text((close_x, close_y), '”', font=close_font, fill=cl.PINK)
-
-    # ---- Attribution -------------------------------------------------
-    attribution = str(slide.get('attribution') or '').strip().upper()
-    attr_font = cl.lf(cl.BARLOW, 48)
-    attr_y = quote_bottom + 28
-    draw.text((quote_x, attr_y), f'– {attribution}', font=attr_font, fill=cl.PINK)
-
-    detail_raw = str(slide.get('attribution_detail') or '').strip()
-    detail_font = cl.lf(cl.BARLOW, 26)
-    detail_y = attr_y + 54
-    detail_max_w = cl.W - quote_x - cl.R_MARGIN - 24
-    detail_lines = []
-    if detail_raw:
-        for raw_line in [part.strip() for part in detail_raw.split('\n') if part.strip()]:
-            wrapped = _wrap_plain_lines(raw_line, detail_font, detail_max_w)
-            detail_lines.extend(wrapped if wrapped else [raw_line])
-        for line in detail_lines[:3]:
-            draw.text((quote_x, detail_y), line, font=detail_font, fill=cl.WHITE)
-            detail_y += 30
-    attr_bottom = detail_y if detail_lines else attr_y + 56
-
-    # ---- Divider / context ------------------------------------------
-    divider_y = max(850, attr_bottom + 36)
+    # --- Context block ---------------------------------------------------
+    divider_y = max(attr_bottom + 18, 790)
     draw.line((cl.L_MARGIN, divider_y, cl.W - cl.R_MARGIN, divider_y), fill=cl.PINK, width=5)
 
-    context_lines = list(slide.get('context_headline_lines') or [])
-    context_colors = list(slide.get('context_headline_colors') or [])
+    context_lines = list(slide.get("context_headline_lines") or [])
+    context_colors = list(slide.get("context_headline_colors") or [])
     if not context_colors:
-        context_colors = ['white'] * len(context_lines)
+        context_colors = ["white"] * len(context_lines)
 
-    context_y = divider_y + 30
+    context_y = divider_y + 26
     context_bottom = context_y
     if context_lines:
-        max_w = cl.W - cl.L_MARGIN - cl.R_MARGIN - 42
-        chosen_font = None
-        chosen_lh = None
-        for size in range(78, 52, -2):
+        max_w = cl.W - cl.L_MARGIN - cl.R_MARGIN - 200
+        size = 64
+        while size >= 44:
             font = cl.lf(cl.BARLOW, size)
-            asc, desc = font.getmetrics()
-            lh = int((asc + desc) * 0.82)
             ok = True
-            for line in context_lines[:3]:
+            for line in context_lines:
                 bb = draw.textbbox((0, 0), str(line).upper(), font=font)
                 if bb[2] - bb[0] > max_w:
                     ok = False
                     break
             if ok:
-                chosen_font = font
-                chosen_lh = lh
                 break
-        if chosen_font is None:
-            chosen_font = cl.lf(cl.BARLOW, 54)
-            asc, desc = chosen_font.getmetrics()
-            chosen_lh = int((asc + desc) * 0.82)
+            size -= 2
+        font = cl.lf(cl.BARLOW, size)
+        asc, desc = font.getmetrics()
+        lh = int((asc + desc) * 0.82)
         cy = context_y
         for idx, line in enumerate(context_lines[:3]):
-            color_name = str(context_colors[idx] if idx < len(context_colors) else 'white').lower()
-            fill = cl.PINK if color_name == 'pink' else cl.WHITE
-            draw.text((cl.L_MARGIN, cy), str(line).upper(), font=chosen_font, fill=fill)
-            cy += chosen_lh
+            color_name = str(context_colors[idx] if idx < len(context_colors) else "white").lower()
+            fill = cl.PINK if color_name == "pink" else cl.WHITE
+            draw.text((cl.L_MARGIN, cy), str(line).upper(), font=font, fill=fill)
+            cy += lh
         context_bottom = cy
 
-    body_segments = _segments(slide.get('context_body'), cl.WHITE, uppercase=False)
+    body_segments = normalize_segments(slide.get("context_body"), cl.WHITE)
     if body_segments:
-        body_y = context_bottom + 18
-        body_w = cl.W - cl.L_MARGIN - cl.R_MARGIN - 10
+        body_y = context_bottom + 14
+        body_w = cl.W - cl.L_MARGIN - cl.R_MARGIN - 180
         chosen = None
-        for size in range(42, 37, -1):
+        for size in range(38, 29, -1):
             font = cl.lf(cl.BASK_REG, size)
             asc, desc = font.getmetrics()
-            lh = int((asc + desc) * 1.15)
-            lines = _wrap_rich(body_segments, font, body_w)
-            if 2 <= len(lines) <= 5 and body_y + len(lines) * lh <= cl.FOOTER_SAFE - 8:
+            lh = int((asc + desc) * 1.13)
+            lines = wrap_rich(body_segments, font, body_w)
+            if len(lines) <= 4 and body_y + len(lines) * lh <= cl.FOOTER_SAFE - 12:
                 chosen = (font, lines, lh)
                 break
         if chosen is None:
-            font = cl.lf(cl.BASK_REG, 38)
+            font = cl.lf(cl.BASK_REG, 30)
             asc, desc = font.getmetrics()
-            chosen = (font, _wrap_rich(body_segments, font, body_w), int((asc + desc) * 1.15))
+            chosen = (font, wrap_rich(body_segments, font, body_w), int((asc + desc) * 1.10))
         body_font, body_lines, body_lh = chosen
-        _draw_rich_lines(body_lines[:5], body_font, cl.L_MARGIN, body_y, body_lh)
+        draw_rich_lines(body_lines[:4], body_font, cl.L_MARGIN, body_y, body_lh)
 
     cl.draw_footer(
         draw,
         brand_name=story.brand_footer,
-        arrow=bool(slide.get('arrow', True)),
+        arrow=bool(slide.get("arrow", True)),
     )
     return img, qa_notes
 

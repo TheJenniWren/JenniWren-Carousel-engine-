@@ -42,62 +42,27 @@ def render_stat_callout(slide: StorySlide, n: int, total: int, story: StoryPacka
 
 
 def render_stat_grid(slide: StorySlide, n: int, total: int, story: StoryPackage,
-                     defaults: TemplateDefaults):
+                      defaults: TemplateDefaults):
     require_fields(slide, "label", "stat_items")
     qa_notes: List[str] = []
-
     img, draw = cl.new_canvas()
     cl.draw_top_bar(draw, slide.get("label"), n, total, big=bool(slide.get("big_label", False)))
-
+    y0 = cl.HEAD_Y
     headline_lines = slide.get("headline_lines")
     if headline_lines:
-        colors = colors_from_names(
-            slide.get("headline_colors", ["white"] * len(headline_lines)),
-            slide.slide_id,
-        )
-        headline_range = tuple(slide.get("headline_range", (132, 246)))
-        y0 = cl.draw_headline(
-            draw,
-            headline_lines,
-            colors,
-            cl.HEAD_Y,
-            headline_range,
-        ) + 118
-    else:
-        y0 = cl.HEAD_Y + 170
-
-    raw_items = slide.get("stat_items") or []
-    items = []
-    for item in raw_items:
-        if isinstance(item, dict):
-            items.append(item)
-        elif isinstance(item, (list, tuple)):
-            items.append({
-                "stat_text": str(item[0]) if len(item) > 0 else "",
-                "label": str(item[1]) if len(item) > 1 else "",
-            })
-        else:
-            items.append({"stat_text": str(item), "label": ""})
-
+        colors = colors_from_names(slide.get("headline_colors", ["white"] * len(headline_lines)), slide.slide_id)
+        sr = tuple(slide.get("headline_range", defaults.grid_headline_range))
+        y0 = cl.draw_headline(draw, headline_lines, colors, cl.HEAD_Y, sr) + 60
+    items = [tuple(item) for item in slide.get("stat_items")]
     grid_bottom = cl.draw_stat_grid(
-        draw,
-        items,
-        y0,
+        draw, items, y0,
         cols=slide.get("grid_cols", defaults.grid_cols),
-        cell_h=slide.get("grid_cell_h", 270),
+        cell_h=slide.get("grid_cell_h", defaults.grid_cell_h),
     )
-
     if grid_bottom > cl.FOOTER_SAFE:
         qa_notes.append(
             f"stat_grid extends to y={grid_bottom}, past the footer-safe line "
             f"(y={cl.FOOTER_SAFE}) -- reduce grid_cell_h or item count."
         )
-
-    cl.draw_footer(
-        draw,
-        brand_name=story.brand_footer,
-        arrow=bool(slide.get("arrow", True)),
-    )
+    cl.draw_footer(draw, brand_name=story.brand_footer, arrow=bool(slide.get("arrow", True)))
     return img, qa_notes
-
-
