@@ -34,6 +34,13 @@ RENDERER = ROOT / "render_carousel.py"
 HOST = "0.0.0.0"
 PORT = 8000
 PREVIEW_FOLDER = "_studio_live_preview"
+
+PHOTO_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+PHOTO_UPLOAD_CONTENT_TYPES = {"image/png", "image/jpeg"}
+PHOTO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+PHOTO_MIN_WIDTH = 1080
+PHOTO_MIN_HEIGHT = 1350
+
 PREVIEW_STORY = "studio-live-preview"
 
 # Studio 3.9 authoritative production template contract.
@@ -144,7 +151,7 @@ EDITORIAL_SCHEMAS: dict[str, dict[str, Any]] = {
         "label": "Cover — Photo Story",
         "required": ["image", "headline"],
         "fields": [
-            {"name": "image", "label": "Image filename", "type": "text"},
+            {"name": "image", "label": "Photo", "type": "photo"},
             {"name": "headline", "label": "Headline", "type": "headline"},
             {"name": "citation", "label": "Citation", "type": "text"},
         ],
@@ -1176,6 +1183,104 @@ def safe_child(base: Path, child: str) -> Path:
     return candidate
 
 
+
+def sanitize_photo_filename(filename: str) -> str:
+    raw = Path(str(filename or "")).name
+    suffix = Path(raw).suffix.lower()
+    if suffix not in PHOTO_UPLOAD_EXTENSIONS:
+        raise ValueError("Choose a PNG, JPG, or JPEG image.")
+    stem = re.sub(r"[^a-zA-Z0-9]+", "-", Path(raw).stem).strip("-").lower()
+    if not stem:
+        stem = "photo"
+    return f"{stem}{suffix}"
+
+
+def unique_photo_path(directory: Path, filename: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    clean = sanitize_photo_filename(filename)
+    candidate = safe_child(directory, clean)
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem
+    suffix = candidate.suffix
+    number = 2
+    while True:
+        candidate = safe_child(directory, f"{stem}-{number:02d}{suffix}")
+        if not candidate.exists():
+            return candidate
+        number += 1
+
+
+def inspect_photo_upload(*, filename: str, content_type: str, content: bytes) -> tuple[str, int, int, list[str]]:
+    clean = sanitize_photo_filename(filename)
+    normalized_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    if normalized_type not in PHOTO_UPLOAD_CONTENT_TYPES:
+        raise ValueError("Choose a PNG, JPG, or JPEG image.")
+    if not content:
+        raise ValueError("The selected photo is empty.")
+    if len(content) > PHOTO_UPLOAD_MAX_BYTES:
+        raise ValueError("The selected photo exceeds the 25 MB upload limit.")
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(content)) as image:
+            image.load()
+            width, height = image.size
+            detected = str(image.format or "").upper()
+    except Exception as exc:
+        raise ValueError("The selected file is not a readable PNG or JPEG image.") from exc
+
+    expected = "PNG" if Path(clean).suffix == ".png" else "JPEG"
+    if detected != expected:
+        raise ValueError(
+            f"The filename extension does not match the image data. Expected {expected}; detected {detected or 'unknown'}."
+        )
+
+    warnings: list[str] = []
+    if width < PHOTO_MIN_WIDTH or height < PHOTO_MIN_HEIGHT:
+        warnings.append(
+            f"Image is {width} × {height}px. Recommended minimum: {PHOTO_MIN_WIDTH} × {PHOTO_MIN_HEIGHT}px."
+        )
+    if width > height:
+        warnings.append("Landscape image accepted. Photo Story will crop it to the cover frame.")
+    return clean, width, height, warnings
+
+
+def photo_image_names(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    slides = payload.get("slides")
+    if not isinstance(slides, list):
+        return []
+    names: list[str] = []
+    for slide in slides:
+        if not isinstance(slide, dict) or str(slide.get("template") or "") != "photo_headline":
+            continue
+        name = str(slide.get("image") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def copy_photo_assets(payload: Any, *, source_dir: Path, target_dir: Path, require_all: bool = True) -> list[str]:
+    copied: list[str] = []
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for name in photo_image_names(payload):
+        try:
+            source = safe_child(source_dir, name)
+            target = safe_child(target_dir, name)
+        except ValueError as exc:
+            raise ValueError(f'Unsafe photo filename "{name}".') from exc
+        if not source.is_file():
+            if require_all:
+                raise ValueError(f'image file "{name}" was not found.')
+            continue
+        if source.resolve() != target.resolve():
+            if not target.exists() or source.read_bytes() != target.read_bytes():
+                shutil.copy2(source, target)
+        copied.append(name)
+    return copied
+
+
 def load_story(folder_slug: str) -> dict[str, Any]:
     path = safe_child(STORIES_DIR, folder_slug) / "carousel.json"
     if not path.exists():
@@ -1184,7 +1289,18 @@ def load_story(folder_slug: str) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    try:
+        copy_photo_assets(
+            data,
+            source_dir=path.parent,
+            target_dir=safe_child(STORIES_DIR, PREVIEW_FOLDER),
+            require_all=False,
+        )
+    except (OSError, ValueError):
+        pass
+    return data
 
 
 
@@ -1989,7 +2105,7 @@ def build_page(*, folder_slug: str = "", data: dict[str, Any] | None = None,
 <title>JenniWren Studio 3.9.0</title>
 <style>
 :root{color-scheme:dark;--pink:#ff0a72;--bg:#080808;--panel:#151515;--panel2:#0d0d0d;--border:#363636;--text:#f7f7f7;--muted:#b8b8b8;--danger:#922048}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{width:min(1180px,calc(100% - 28px));margin:24px auto 64px}header{border-top:8px solid var(--pink);padding:24px 0 14px}h1{margin:0;font-size:clamp(38px,7vw,74px);line-height:.92;letter-spacing:-.035em;text-transform:uppercase}h2,h3{margin:0}p,.help{color:var(--muted)}.panel{margin-top:20px;padding:18px;background:var(--panel);border:1px solid var(--border);border-radius:14px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}label{display:block;margin:13px 0 7px;font-weight:800}input,textarea,select{width:100%;padding:12px;border:1px solid #484848;border-radius:10px;background:var(--panel2);color:var(--text);font:inherit}textarea{resize:vertical;line-height:1.42;min-height:105px}textarea.tall{min-height:150px}.actions,.toolbar,.small-actions{display:flex;flex-wrap:wrap;gap:9px}.actions{margin-top:18px}.toolbar{align-items:center;justify-content:space-between}button{border:0;border-radius:10px;padding:12px 18px;background:var(--pink);color:#fff;font:inherit;font-weight:850;cursor:pointer}button.secondary{background:#333}button.danger{background:var(--danger)}button.small{padding:7px 10px;font-size:13px}.slide{margin-top:16px;padding:16px;background:#101010;border:1px solid var(--border);border-radius:13px}.slide-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-bottom:10px;border-bottom:1px solid #2d2d2d}.repeater{margin-top:10px}.repeat-row{display:grid;grid-template-columns:170px 1fr auto;gap:8px;align-items:end;margin-top:8px}.repeat-row.stat{grid-template-columns:1fr 1fr auto}.repeat-row.source{grid-template-columns:1fr auto}.repeat-row.headline{grid-template-columns:minmax(0,1fr) 120px auto}.headline-color.white{border-color:#777}.headline-color.pink{border-color:var(--pink)}.notice{margin-top:18px;padding:14px 16px;border-left:5px solid var(--pink);background:#1b1b1b;white-space:pre-wrap}.import-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.import-status{margin-top:10px;padding:10px 12px;border-radius:9px;background:#202020;color:var(--muted);white-space:pre-wrap}.import-status.error{border-left:4px solid #ff567f;color:#fff}.import-status.success{border-left:4px solid #55d98b;color:#fff}pre{overflow-x:auto;white-space:pre-wrap;padding:14px;border:1px solid var(--border);border-radius:10px;background:#050505}.hidden{display:none}.previews{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px}.preview-card{overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--panel2)}.preview-card img{display:block;width:100%;height:auto}.preview-card div{padding:10px 12px;color:var(--muted);font-size:14px}.editor-preview-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;align-items:start}.preview-pane{position:sticky;top:14px}.live-frame{margin-top:12px;background:#090909;border:1px solid var(--border);border-radius:12px;overflow:hidden;min-height:280px;display:flex;align-items:center;justify-content:center}.live-frame img{display:block;width:100%;height:auto}.live-empty{padding:28px;color:var(--muted);text-align:center}.preview-strip{display:flex;gap:8px;overflow-x:auto;margin-top:10px;padding-bottom:4px}.preview-thumb{flex:0 0 74px;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#111;padding:0}.preview-thumb.active{border-color:var(--pink)}.preview-thumb img{display:block;width:100%;height:auto}.preview-status{margin-top:10px;color:var(--muted)}.status-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#777;margin-right:7px}.status-dot.busy{background:#ffbf47}.status-dot.good{background:#55d98b}.status-dot.bad{background:#ff567f}.slide.active{outline:2px solid var(--pink);outline-offset:2px}.dirty-badge{display:none;color:#ffbf47;font-size:12px;font-weight:800;margin-left:8px}.slide.dirty .dirty-badge{display:inline}.validation-box{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:#101010}.validation-box.good{border-left:4px solid #55d98b}.validation-box.bad{border-left:4px solid #ff567f}.validation-title{font-weight:850;margin-bottom:6px}.validation-list{margin:0;padding-left:18px;color:var(--muted)}.preview-nav{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;margin-top:12px}.preview-nav .counter{text-align:center;font-weight:800}.save-state{margin-left:auto;color:var(--muted);font-size:13px}.import-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.import-tab.active{background:var(--pink)}.reporting-help{font-size:13px;color:var(--muted);margin-top:6px}.field-error{border-color:#ff567f!important;box-shadow:0 0 0 1px #ff567f}.slide.collapsed .slide-body{display:none}.slide-summary{display:none;color:var(--muted);font-size:13px;margin-top:8px;line-height:1.4}.slide.collapsed .slide-summary{display:block}.slide.collapsed{padding:12px 14px}.slide.collapsed .slide-head{border-bottom:0;padding-bottom:0}.drag-handle{cursor:grab;user-select:none;padding:7px 10px;background:#252525;border-radius:8px;font-weight:900}.slide.dragging{opacity:.5}.slide.drop-target{outline:2px dashed var(--pink);outline-offset:3px}.ai-builder-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.ai-choice{display:flex;gap:8px;align-items:center;margin-top:8px}.ai-plan{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:#101010}.thumb-drag{cursor:grab}.app-error{margin:18px 0;padding:16px;border:1px solid #ff567f;border-left:6px solid #ff567f;border-radius:12px;background:#231016}.app-error h2{margin:0 0 8px}.app-error pre{margin:10px 0 0}.template-error{padding:12px;border:1px solid #ff567f;border-radius:10px;background:#211015;color:#fff}summary{cursor:pointer;font-weight:800}@media(max-width:900px){.editor-preview-grid{grid-template-columns:1fr}.preview-pane{position:static}}@media(max-width:720px){.two,.import-grid,.ai-builder-grid{grid-template-columns:1fr;gap:0}.slide-head{align-items:flex-start;flex-direction:column}.repeat-row,.repeat-row.stat{grid-template-columns:1fr}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{width:min(1180px,calc(100% - 28px));margin:24px auto 64px}header{border-top:8px solid var(--pink);padding:24px 0 14px}h1{margin:0;font-size:clamp(38px,7vw,74px);line-height:.92;letter-spacing:-.035em;text-transform:uppercase}h2,h3{margin:0}p,.help{color:var(--muted)}.panel{margin-top:20px;padding:18px;background:var(--panel);border:1px solid var(--border);border-radius:14px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}label{display:block;margin:13px 0 7px;font-weight:800}input,textarea,select{width:100%;padding:12px;border:1px solid #484848;border-radius:10px;background:var(--panel2);color:var(--text);font:inherit}textarea{resize:vertical;line-height:1.42;min-height:105px}textarea.tall{min-height:150px}.actions,.toolbar,.small-actions{display:flex;flex-wrap:wrap;gap:9px}.actions{margin-top:18px}.toolbar{align-items:center;justify-content:space-between}button{border:0;border-radius:10px;padding:12px 18px;background:var(--pink);color:#fff;font:inherit;font-weight:850;cursor:pointer}button.secondary{background:#333}button.danger{background:var(--danger)}button.small{padding:7px 10px;font-size:13px}.slide{margin-top:16px;padding:16px;background:#101010;border:1px solid var(--border);border-radius:13px}.slide-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-bottom:10px;border-bottom:1px solid #2d2d2d}.repeater{margin-top:10px}.repeat-row{display:grid;grid-template-columns:170px 1fr auto;gap:8px;align-items:end;margin-top:8px}.repeat-row.stat{grid-template-columns:1fr 1fr auto}.repeat-row.source{grid-template-columns:1fr auto}.repeat-row.headline{grid-template-columns:minmax(0,1fr) 120px auto}.headline-color.white{border-color:#777}.headline-color.pink{border-color:var(--pink)}.notice{margin-top:18px;padding:14px 16px;border-left:5px solid var(--pink);background:#1b1b1b;white-space:pre-wrap}.import-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.import-status{margin-top:10px;padding:10px 12px;border-radius:9px;background:#202020;color:var(--muted);white-space:pre-wrap}.import-status.error{border-left:4px solid #ff567f;color:#fff}.import-status.success{border-left:4px solid #55d98b;color:#fff}pre{overflow-x:auto;white-space:pre-wrap;padding:14px;border:1px solid var(--border);border-radius:10px;background:#050505}.hidden{display:none}.previews{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px}.preview-card{overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--panel2)}.preview-card img{display:block;width:100%;height:auto}.preview-card div{padding:10px 12px;color:var(--muted);font-size:14px}.editor-preview-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;align-items:start}.preview-pane{position:sticky;top:14px}.live-frame{margin-top:12px;background:#090909;border:1px solid var(--border);border-radius:12px;overflow:hidden;min-height:280px;display:flex;align-items:center;justify-content:center}.live-frame img{display:block;width:100%;height:auto}.live-empty{padding:28px;color:var(--muted);text-align:center}.preview-strip{display:flex;gap:8px;overflow-x:auto;margin-top:10px;padding-bottom:4px}.preview-thumb{flex:0 0 74px;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#111;padding:0}.preview-thumb.active{border-color:var(--pink)}.preview-thumb img{display:block;width:100%;height:auto}.preview-status{margin-top:10px;color:var(--muted)}.status-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#777;margin-right:7px}.status-dot.busy{background:#ffbf47}.status-dot.good{background:#55d98b}.status-dot.bad{background:#ff567f}.slide.active{outline:2px solid var(--pink);outline-offset:2px}.dirty-badge{display:none;color:#ffbf47;font-size:12px;font-weight:800;margin-left:8px}.slide.dirty .dirty-badge{display:inline}.validation-box{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:#101010}.validation-box.good{border-left:4px solid #55d98b}.validation-box.bad{border-left:4px solid #ff567f}.validation-title{font-weight:850;margin-bottom:6px}.validation-list{margin:0;padding-left:18px;color:var(--muted)}.preview-nav{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;margin-top:12px}.preview-nav .counter{text-align:center;font-weight:800}.save-state{margin-left:auto;color:var(--muted);font-size:13px}.import-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.import-tab.active{background:var(--pink)}.reporting-help{font-size:13px;color:var(--muted);margin-top:6px}.field-error{border-color:#ff567f!important;box-shadow:0 0 0 1px #ff567f}.photo-upload{margin-top:8px;padding:10px;border:1px solid #3d3d3d;border-radius:10px;background:#101010}.photo-upload-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.photo-upload input[type=file]{display:none}.photo-upload-status{margin-top:8px;color:var(--muted);font-size:13px;white-space:pre-wrap}.photo-upload-status.good{color:#7ee2a8}.photo-upload-status.warn{color:#ffd27a}.photo-upload-status.bad{color:#ff7898}.slide.collapsed .slide-body{display:none}.slide-summary{display:none;color:var(--muted);font-size:13px;margin-top:8px;line-height:1.4}.slide.collapsed .slide-summary{display:block}.slide.collapsed{padding:12px 14px}.slide.collapsed .slide-head{border-bottom:0;padding-bottom:0}.drag-handle{cursor:grab;user-select:none;padding:7px 10px;background:#252525;border-radius:8px;font-weight:900}.slide.dragging{opacity:.5}.slide.drop-target{outline:2px dashed var(--pink);outline-offset:3px}.ai-builder-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.ai-choice{display:flex;gap:8px;align-items:center;margin-top:8px}.ai-plan{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:#101010}.thumb-drag{cursor:grab}.app-error{margin:18px 0;padding:16px;border:1px solid #ff567f;border-left:6px solid #ff567f;border-radius:12px;background:#231016}.app-error h2{margin:0 0 8px}.app-error pre{margin:10px 0 0}.template-error{padding:12px;border:1px solid #ff567f;border-radius:10px;background:#211015;color:#fff}summary{cursor:pointer;font-weight:800}@media(max-width:900px){.editor-preview-grid{grid-template-columns:1fr}.preview-pane{position:static}}@media(max-width:720px){.two,.import-grid,.ai-builder-grid{grid-template-columns:1fr;gap:0}.slide-head{align-items:flex-start;flex-direction:column}.repeat-row,.repeat-row.stat{grid-template-columns:1fr}}
 .trace-panel{margin-top:10px;border:1px solid var(--line);border-radius:10px;background:#0f0f0f;padding:8px}.trace-panel summary{cursor:pointer;font-weight:800}.trace-panel pre{white-space:pre-wrap;word-break:break-word;color:#ddd;font-size:12px;line-height:1.45;margin:10px 0 0}.diagnostic-item{border-left:3px solid var(--pink);padding:8px 10px;margin:8px 0;background:#111;border-radius:6px}.diagnostic-kind{font-weight:900}.diagnostic-detail{color:#ddd;white-space:pre-wrap;word-break:break-word}.diagnostic-trace{margin-top:8px;font-size:11px;white-space:pre-wrap;word-break:break-word;color:#bbb;max-height:260px;overflow:auto}.execution-answer{margin-top:10px;border:1px solid #4a2440;border-left:4px solid var(--pink);border-radius:10px;background:#130d12;padding:12px}.execution-answer.success{border-color:#245c40;border-left-color:#35d07f;background:#0d1511}.execution-answer.failure{border-color:#7a2945;border-left-color:#ff4f7f;background:#190d12}.execution-answer.waiting{border-color:#555;border-left-color:#888;background:#111}.execution-kicker{font-size:11px;font-weight:900;letter-spacing:.08em;color:var(--pink)}.execution-title{font-size:15px;font-weight:900;margin-top:4px}.execution-reason{color:#ddd;margin-top:5px;line-height:1.4}.execution-next{color:#aaa;margin-top:7px;font-size:12px;line-height:1.4}.first-cover-box{display:flex;gap:10px;align-items:center;justify-content:space-between;margin:10px 0;padding:10px;border:1px solid #5e2850;border-radius:10px;background:#150d13}.first-cover-copy{font-size:11px;color:#bbb;line-height:1.35;margin-top:3px}.first-cover-box button{white-space:nowrap}.template-engine-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.template-engine-head p{margin:.25rem 0 0;color:var(--muted)}.template-engine-summary{margin:12px 0;font-weight:800}.template-engine-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.template-engine-card{border:1px solid var(--border);border-radius:9px;padding:9px;background:#101010}.template-engine-card.ok{border-left:3px solid #35d07f}.template-engine-card.bad{border-left:3px solid #ff4f7f}.template-engine-card strong{display:block}.template-engine-meta{font-size:11px;color:#aaa;margin-top:3px}@media(max-width:720px){.template-engine-head{display:block}.template-engine-head button{margin-top:10px}.template-engine-grid{grid-template-columns:1fr}}</style>
 </head>
 <body>
@@ -2278,7 +2394,18 @@ function normalizeHeadlineRows(value){
   return [{text:"",color:"white"}];
 }
 function headlineRowHTML(item={}){const color=String(item.color||"white").toLowerCase()==="pink"?"pink":"white";return `<div class="repeat-row headline"><input data-part="text" value="${escapeHTML(String(item.text||item.line||""))}" placeholder="Headline line"><select class="headline-color ${color}" data-part="color"><option value="white" ${color==="white"?"selected":""}>White</option><option value="pink" ${color==="pink"?"selected":""}>Pink</option></select>${removeButton()}</div>`}
-function fieldHTML(type,key,label,value){if(type==="headline"){const rows=normalizeHeadlineRows(value);return `<div class="repeater" data-repeater="${key}" data-type="headline"><div class="toolbar"><label>${label}</label><button type="button" class="small secondary" data-add-row>Add line</button></div><div class="reporting-help">Each row is one fixed line. Choose white or pink. Lines are rendered exactly in this order.</div>${rows.map(headlineRowHTML).join("")}</div>`;}if(type==="text")return `<label>${label}</label><input data-key="${key}" value="${escapeHTML(String(value||""))}">`;if(type==="lines")return `<label>${label}</label><textarea data-key="${key}" data-type="lines">${escapeHTML(asLines(value))}</textarea>`;if(type==="body")return `<label>${label}</label><textarea class="tall" data-key="${key}" data-type="body">${escapeHTML(asBody(value))}</textarea>`;if(type==="timeline"){const rows=Array.isArray(value)&&value.length?value:[{date:"",text:""}];return `<div class="repeater" data-repeater="${key}" data-type="timeline"><div class="toolbar"><label>${label}</label><button type="button" class="small secondary" data-add-row>Add Event</button></div>${rows.map(item=>`<div class="repeat-row"><input data-part="date" value="${escapeHTML(String(item.date||item.label||""))}" placeholder="Date"><input data-part="text" value="${escapeHTML(String(item.text||item.event||""))}" placeholder="Event">${removeButton()}</div>`).join("")}</div>`}if(type==="stats"){const rows=Array.isArray(value)&&value.length?value:[{stat_text:"",stat_label:""}];return `<div class="repeater" data-repeater="${key}" data-type="stats"><div class="toolbar"><label>${label}</label><button type="button" class="small secondary" data-add-row>Add statistic</button></div>${rows.map(item=>`<div class="repeat-row stat"><input data-part="stat_text" value="${escapeHTML(String(item.stat_text||item.value||""))}" placeholder="Statistic"><input data-part="stat_label" value="${escapeHTML(String(item.stat_label||item.label||""))}" placeholder="Label">${removeButton()}</div>`).join("")}</div>`}if(type==="sources"){const rows=Array.isArray(value)&&value.length?value:[""];return `<div class="repeater" data-repeater="${key}" data-type="sources"><div class="toolbar"><label>${label}</label><button type="button" class="small secondary" data-add-row>Add source</button></div>${rows.map(item=>`<div class="repeat-row source"><input data-part="citation" value="${escapeHTML(String(typeof item==="object"?item.citation||item.text||"":item))}" placeholder="Source citation">${removeButton()}</div>`).join("")}</div>`}if(type==="textarea")return `<label>${label}</label><textarea class="tall" data-key="${key}" data-type="editorial-text">${escapeHTML(Array.isArray(value)?asLines(value):asBody(value))}</textarea>`;if(type==="indices")return `<label>${label}</label><input data-key="${key}" data-type="indices" value="${escapeHTML(Array.isArray(value)?value.map(v=>Number(v)+1).join(", "):String(value||""))}" placeholder="Example: 2, 4">`;if(type==="boolean")return `<label class="check"><input type="checkbox" data-key="${key}" data-type="boolean" ${value!==false?"checked":""}> ${label}</label>`;return ""}
+function fieldHTML(type,key,label,value){if(type==="headline"){const rows=normalizeHeadlineRows(value);return `<div class="repeater" data-repeater="${key}" data-type="headline"><div class="toolbar"><label>${label}</label><button type="button" class="small secondary" data-add-row>Add line</button></div><div class="reporting-help">Each row is one fixed line. Choose white or pink. Lines are rendered exactly in this order.</div>${rows.map(headlineRowHTML).join("")}</div>`;}if(type==="photo"){
+  const filename=String(value||"");
+  return `<div class="photo-upload">
+    <label>${label}</label>
+    <input data-key="${key}" data-photo-name value="${escapeHTML(filename)}" placeholder="No photo uploaded">
+    <div class="photo-upload-row">
+      <button type="button" class="small secondary" data-choose-photo>Choose Photo</button>
+      <input type="file" data-photo-file accept=".png,.jpg,.jpeg,image/png,image/jpeg">
+    </div>
+    <div class="photo-upload-status ${filename?"good":""}" data-photo-status>${filename?`Uploaded: ${escapeHTML(filename)}`:"PNG, JPG, or JPEG. Recommended minimum 1080 × 1350px."}</div>
+  </div>`;
+}if(type==="text")return `<label>${label}</label><input data-key="${key}" value="${escapeHTML(String(value||""))}">`;if(type==="lines")return `<label>${label}</label><textarea data-key="${key}" data-type="lines">${escapeHTML(asLines(value))}</textarea>`;if(type==="body")return `<label>${label}</label><textarea class="tall" data-key="${key}" data-type="body">${escapeHTML(asBody(value))}</textarea>`;if(type==="timeline"){const rows=Array.isArray(value)&&value.length?value:[{date:"",text:""}];return `<div class="repeater" data-repeater="${key}" data-type="timeline"><div class="toolbar"><label>${label}</label><button type="button" class="small secondary" data-add-row>Add Event</button></div>${rows.map(item=>`<div class="repeat-row"><input data-part="date" value="${escapeHTML(String(item.date||item.label||""))}" placeholder="Date"><input data-part="text" value="${escapeHTML(String(item.text||item.event||""))}" placeholder="Event">${removeButton()}</div>`).join("")}</div>`}if(type==="stats"){const rows=Array.isArray(value)&&value.length?value:[{stat_text:"",stat_label:""}];return `<div class="repeater" data-repeater="${key}" data-type="stats"><div class="toolbar"><label>${label}</label><button type="button" class="small secondary" data-add-row>Add statistic</button></div>${rows.map(item=>`<div class="repeat-row stat"><input data-part="stat_text" value="${escapeHTML(String(item.stat_text||item.value||""))}" placeholder="Statistic"><input data-part="stat_label" value="${escapeHTML(String(item.stat_label||item.label||""))}" placeholder="Label">${removeButton()}</div>`).join("")}</div>`}if(type==="sources"){const rows=Array.isArray(value)&&value.length?value:[""];return `<div class="repeater" data-repeater="${key}" data-type="sources"><div class="toolbar"><label>${label}</label><button type="button" class="small secondary" data-add-row>Add source</button></div>${rows.map(item=>`<div class="repeat-row source"><input data-part="citation" value="${escapeHTML(String(typeof item==="object"?item.citation||item.text||"":item))}" placeholder="Source citation">${removeButton()}</div>`).join("")}</div>`}if(type==="textarea")return `<label>${label}</label><textarea class="tall" data-key="${key}" data-type="editorial-text">${escapeHTML(Array.isArray(value)?asLines(value):asBody(value))}</textarea>`;if(type==="indices")return `<label>${label}</label><input data-key="${key}" data-type="indices" value="${escapeHTML(Array.isArray(value)?value.map(v=>Number(v)+1).join(", "):String(value||""))}" placeholder="Example: 2, 4">`;if(type==="boolean")return `<label class="check"><input type="checkbox" data-key="${key}" data-type="boolean" ${value!==false?"checked":""}> ${label}</label>`;return ""}
 function genericEditorHTML(data={}){
   return `
     <div class="template-error">
@@ -2292,6 +2419,35 @@ function genericEditorHTML(data={}){
     <label>Citation</label>
     <input data-key="citation" value="${escapeHTML(String(data.citation||""))}">
   `;
+}
+
+
+async function uploadPhoto(file,slide){
+  const status=slide.querySelector("[data-photo-status]");
+  const nameInput=slide.querySelector("[data-photo-name]");
+  if(!file||!status||!nameInput)return;
+  status.className="photo-upload-status";
+  status.textContent=`Uploading ${file.name}…`;
+  try{
+    const response=await fetch("/upload-photo",{
+      method:"POST",
+      headers:{"Content-Type":file.type||"application/octet-stream","X-Filename":encodeURIComponent(file.name)},
+      body:file
+    });
+    const result=await response.json();
+    if(!response.ok||!result.ok)throw new Error(result.error||"Photo upload failed.");
+    nameInput.value=result.filename;
+    const warnings=Array.isArray(result.warnings)?result.warnings:[];
+    status.className=`photo-upload-status ${warnings.length?"warn":"good"}`;
+    status.textContent=`Uploaded: ${result.filename}\n${result.width} × ${result.height}px${warnings.length?`\n${warnings.join("\n")}`:""}`;
+    markDirty(slide);
+    syncEditorStateFromDOM();
+    updateAllSummaries();
+    await selectSlide([...slidesRoot.querySelectorAll("[data-slide]")].indexOf(slide),{render:true});
+  }catch(error){
+    status.className="photo-upload-status bad";
+    status.textContent=`Upload failed: ${error.message}`;
+  }
 }
 
 function renderDynamic(slide,data={}){
@@ -2523,6 +2679,13 @@ function syncPayload(){
   return buildPayload();
 }
 slidesRoot.addEventListener("change",event=>{
+  if(event.target.matches("[data-photo-file]")){
+    const slide=event.target.closest("[data-slide]");
+    const file=event.target.files&&event.target.files[0];
+    if(slide&&file)uploadPhoto(file,slide);
+    event.target.value="";
+    return;
+  }
   if(event.target.matches("[data-part=\"color\"]")){
     event.target.classList.toggle("pink",event.target.value==="pink");
     event.target.classList.toggle("white",event.target.value!=="pink");
@@ -2539,6 +2702,12 @@ slidesRoot.addEventListener("click",event=>{
   const button=event.target.closest("button");
   if(!button)return;
   const slide=button.closest("[data-slide]");
+
+  if(button.matches("[data-choose-photo]")){
+    const input=slide?.querySelector("[data-photo-file]");
+    if(input)input.click();
+    return;
+  }
 
   if(button.matches("[data-add-row]")){
     const repeater=button.closest("[data-repeater]");
@@ -3769,6 +3938,37 @@ class StudioHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
+        if self.path == "/upload-photo":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0:
+                    raise ValueError("The selected photo is empty.")
+                if length > PHOTO_UPLOAD_MAX_BYTES:
+                    raise ValueError("The selected photo exceeds the 25 MB upload limit.")
+                raw_name = urllib.parse.unquote(str(self.headers.get("X-Filename") or ""))
+                content_type = str(self.headers.get("Content-Type") or "")
+                content = self.rfile.read(length)
+                clean, width, height, warnings = inspect_photo_upload(
+                    filename=raw_name,
+                    content_type=content_type,
+                    content=content,
+                )
+                preview_dir = safe_child(STORIES_DIR, PREVIEW_FOLDER)
+                destination = unique_photo_path(preview_dir, clean)
+                destination.write_bytes(content)
+            except (OSError, ValueError) as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            self.send_json({
+                "ok": True,
+                "filename": destination.name,
+                "width": width,
+                "height": height,
+                "warnings": warnings,
+                "message": f"Uploaded: {destination.name}",
+            })
+            return
+
         if self.path == "/template-engine-test":
             payload = template_engine_sample_story()
             story_dir = safe_child(STORIES_DIR, PREVIEW_FOLDER)
@@ -3925,6 +4125,12 @@ class StudioHandler(BaseHTTPRequestHandler):
 
             story_dir = safe_child(STORIES_DIR, folder_slug)
             story_dir.mkdir(parents=True, exist_ok=True)
+            copy_photo_assets(
+                payload,
+                source_dir=safe_child(STORIES_DIR, PREVIEW_FOLDER),
+                target_dir=story_dir,
+                require_all=True,
+            )
             (story_dir / "carousel.draft.json").write_text(
                 json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
                 encoding="utf-8",
@@ -3980,6 +4186,23 @@ class StudioHandler(BaseHTTPRequestHandler):
             )
             return
         story_dir = safe_child(STORIES_DIR, folder_slug); story_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            copy_photo_assets(
+                payload,
+                source_dir=safe_child(STORIES_DIR, PREVIEW_FOLDER),
+                target_dir=story_dir,
+                require_all=True,
+            )
+        except ValueError as exc:
+            self.send_html(
+                build_page(
+                    folder_slug=folder_slug,
+                    data=payload,
+                    message=f"Validation failed: {exc}",
+                ),
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
         (story_dir / "carousel.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         if self.path == "/save":
             self.send_html(build_page(folder_slug=folder_slug, data=payload, message=f"Saved stories/{folder_slug}/carousel.json")); return
